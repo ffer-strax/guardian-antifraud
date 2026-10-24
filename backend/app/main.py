@@ -1,18 +1,36 @@
+import logging
 import os
 
+# pyrefly: ignore[missing-import]
 import redis
+# pyrefly: ignore[missing-import]
 from fastapi import FastAPI, HTTPException, Request
+# pyrefly: ignore[missing-import]
 from pydantic import BaseModel, EmailStr
 
 from services.email_utils import canonicalize_email, is_disposable
 from services.rate_limiter import check_rate_limit
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="guardian-antifraud")
 
 
 def _env_int(name: str, default: int) -> int:
-    value = os.getenv(name)
-    return int(value) if value else default
+    """Lee un entero positivo del entorno; si falta o es inválido, usa el default."""
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    # En los warnings va solo el nombre: el valor podría ser un secreto mal colocado.
+    try:
+        number = int(value)
+    except ValueError:
+        logger.warning("%s no es un entero, se usa el default %s", name, default)
+        return default
+    if number <= 0:
+        logger.warning("%s debe ser mayor que 0, se usa el default %s", name, default)
+        return default
+    return number
 
 
 _redis_timeout_seconds = _env_int("REDIS_TIMEOUT_MS", 200) / 1000
