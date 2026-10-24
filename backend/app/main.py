@@ -1,11 +1,10 @@
 import logging
 import os
 
-# pyrefly: ignore[missing-import]
 import redis
-# pyrefly: ignore[missing-import]
+
 from fastapi import FastAPI, HTTPException, Request
-# pyrefly: ignore[missing-import]
+
 from pydantic import BaseModel, EmailStr
 
 from services.email_utils import canonicalize_email, is_disposable
