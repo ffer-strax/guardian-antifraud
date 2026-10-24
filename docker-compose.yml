@@ -5,21 +5,23 @@ services:
       - "8000:8000"
     environment:
       REDIS_URL: redis://redis:6379/0
-      REDIS_TIMEOUT_MS: ${REDIS_TIMEOUT_MS}
-      RATE_LIMIT_IP_MAX: ${RATE_LIMIT_IP_MAX}
-      RATE_LIMIT_IP_WINDOW_SECONDS: ${RATE_LIMIT_IP_WINDOW_SECONDS}
-      RATE_LIMIT_EMAIL_MAX: ${RATE_LIMIT_EMAIL_MAX}
-      RATE_LIMIT_EMAIL_WINDOW_SECONDS: ${RATE_LIMIT_EMAIL_WINDOW_SECONDS}
+      REDIS_TIMEOUT_MS: ${REDIS_TIMEOUT_MS:-}
+      RATE_LIMIT_IP_MAX: ${RATE_LIMIT_IP_MAX:-}
+      RATE_LIMIT_IP_WINDOW_SECONDS: ${RATE_LIMIT_IP_WINDOW_SECONDS:-}
+      RATE_LIMIT_EMAIL_MAX: ${RATE_LIMIT_EMAIL_MAX:-}
+      RATE_LIMIT_EMAIL_WINDOW_SECONDS: ${RATE_LIMIT_EMAIL_WINDOW_SECONDS:-}
     depends_on:
       - postgres
       - redis
 
+  # Los valores por defecto de postgres son SOLO para desarrollo y datos sintéticos.
+  # En producción las credenciales vendrían de un gestor de secretos.
   postgres:
     image: postgres:16.4
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-guardian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cambia_esto}
+      POSTGRES_DB: ${POSTGRES_DB:-guardian}
 
   redis:
     image: redis:7.4.1
