@@ -3,6 +3,12 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_IP_MAX: ${RATE_LIMIT_IP_MAX}
+      RATE_LIMIT_IP_WINDOW_SECONDS: ${RATE_LIMIT_IP_WINDOW_SECONDS}
+      RATE_LIMIT_EMAIL_MAX: ${RATE_LIMIT_EMAIL_MAX}
+      RATE_LIMIT_EMAIL_WINDOW_SECONDS: ${RATE_LIMIT_EMAIL_WINDOW_SECONDS}
     depends_on:
       - postgres
       - redis
