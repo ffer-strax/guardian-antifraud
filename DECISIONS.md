@@ -17,11 +17,12 @@
 - Contexto: el reto sugiere esta arquitectura
 - El Stack es nuevo para mí; tuve que aprenderlo durante el reto; mi stack habitual es nodejs, TS y Next.js
 
-## D4. Puertos 5432 y 6379 expuestos al host
-- Contexto: el compose publica Postgres y Redis
-- Alternativas: solo red interna de Docker / publicar puertos
-- Decisión: publicados por ahora facilita depurar en local
-- Observación: en producción Postgres y Redis no deben ser accesibles desde fuera deben de estar detras de un firewall
+## D4. Puerto de Postgres expuesto al host; Redis solo en red interna
+- Contexto: el compose publicaba Postgres (5432) y Redis (6379) para depurar.
+- Decisión: Redis ya no se publica (la API llega por la red interna de Docker: redis:6379). Postgres tampoco se publica.
+- Por qué: el puerto de Redis facilitaba manipularlo o tumbarlo (ver D13)redis-cli`.
+- Sin puerto publicado no puedo conectarme con herramientas externas.
+- En producción ninguna base de datos sería accesible desde fuera.
 
 ## D5. Canonicalización de correo solo para Gmail
 - Contexto: Gmail ignora puntos y todo lo que sigue a "+", así que un
