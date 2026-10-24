@@ -5,6 +5,7 @@ services:
       - "8000:8000"
     environment:
       REDIS_URL: redis://redis:6379/0
+      REDIS_TIMEOUT_MS: ${REDIS_TIMEOUT_MS}
       RATE_LIMIT_IP_MAX: ${RATE_LIMIT_IP_MAX}
       RATE_LIMIT_IP_WINDOW_SECONDS: ${RATE_LIMIT_IP_WINDOW_SECONDS}
       RATE_LIMIT_EMAIL_MAX: ${RATE_LIMIT_EMAIL_MAX}
@@ -24,5 +25,3 @@ services:
 
   redis:
     image: redis:7.4.1
-    ports:
-      - "6379:6379"

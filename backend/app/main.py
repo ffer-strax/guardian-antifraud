@@ -9,16 +9,19 @@ from services.rate_limiter import check_rate_limit
 
 app = FastAPI(title="guardian-antifraud")
 
-redis_client = redis.Redis.from_url(
-    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-    socket_connect_timeout=1,
-    socket_timeout=1,
-)
-
 
 def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
     return int(value) if value else default
+
+
+_redis_timeout_seconds = _env_int("REDIS_TIMEOUT_MS", 200) / 1000
+
+redis_client = redis.Redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    socket_connect_timeout=_redis_timeout_seconds,
+    socket_timeout=_redis_timeout_seconds,
+)
 
 
 def _enforce_limit(key: str, limit: int, window_seconds: int) -> None:
