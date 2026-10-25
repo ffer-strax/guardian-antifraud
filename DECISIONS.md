@@ -17,12 +17,12 @@
 - Contexto: el reto sugiere esta arquitectura
 - El Stack es nuevo para mí; tuve que aprenderlo durante el reto; mi stack habitual es nodejs, TS y Next.js
 
-## D4. Puerto de Postgres expuesto al host; Redis solo en red interna
+## D4. Ninguna base de datos publica puertos al host
 - Contexto: el compose publicaba Postgres (5432) y Redis (6379) para depurar.
-- Decisión: Redis ya no se publica (la API llega por la red interna de Docker: redis:6379). Postgres tampoco se publica.
-- Por qué: el puerto de Redis facilitaba manipularlo o tumbarlo (ver D13)redis-cli`.
-- Sin puerto publicado no puedo conectarme con herramientas externas.
-- En producción ninguna base de datos sería accesible desde fuera.
+- Alternativas: publicar para depurar / solo red interna de Docker.
+- Decisión: quité ambos puertos; la API llega por la red interna (redis:6379).
+- Por qué: reduce la superficie de ataque; Postgres tenía una contraseña de ejemplo conocida
+
 
 ## D5. Canonicalización de correo solo para Gmail
 - Contexto: Gmail ignora puntos y todo lo que sigue a "+", así que un
@@ -92,3 +92,18 @@ copia estatica en el repositorio.
 - Detrás de un proxy, request.client.host sería la IP del proxy; no se confía en X-Forwarded-For.
 - En local con Docker, todas mis pruebas comparten una misma IP.
 - Ventana fija: ráfagas posibles en el borde.
+
+## D15. Valores por defecto de desarrollo en el compose
+- Contexto: .env no se sube es mas bien un clon limpio Postgres fallaba sin contraseña y NFR-1 exige un solo comando.
+- Alternativas: A) defaults en el compose / B) pedir `cp .env.example .env` en el README.
+- Decisión: A, con la sintaxis ${VAR:-valor} para Postgres.
+- Por qué: todo es sintético (PR-6) y el puerto está cerrado; arranca con `docker compose up`.
+- Trade-off: la contraseña de ejemplo es pública, solo válida en desarrollo; en producción vendría de un gestor de secretos. Postgres solo lee estas credenciales al crear la base por primera vez.
+- Verificado: renombré .env, `down -v`, `up --build -d`, los tres contenedores Up y sin errores de contraseña.
+
+## D17. Lectura robusta de variables de entorno
+- Contexto: la auditoría encontró que RATE_LIMIT_IP_MAX=abc daba 500 en cada /register y REDIS_TIMEOUT_MS=abc impedía arrancar. Lo reproduje yo.
+- Decisión: _env_int nunca lanza excepción: variable ausente o vacía usa el default sin warning; texto no entero, cero o negativo usa el default con warning (solo el nombre, nunca el valor).
+- Por qué: un valor de configuración malo no puede tumbar el servicio (PR-5), y una ventana en 0 desactivaría el rate limit en silencio.
+- Trade-off: un valor inválido en un límite genera un warning en cada petición (ruidoso, pero visible). Una variable ausente en producción usa el default sin avisar.
+- Verificado en Docker: con "abc" el endpoint responde 200 y el log muestra el warning.
