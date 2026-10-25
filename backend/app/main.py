@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 from services.email_utils import canonicalize_email, is_disposable
+from services.mx_checker import NO_MAIL, check_mx
 from services.rate_limiter import check_rate_limit
 
 logger = logging.getLogger(__name__)
@@ -80,4 +81,9 @@ def register(payload: RegisterRequest, request: Request) -> dict:
         _env_int("RATE_LIMIT_EMAIL_MAX", 5),
         _env_int("RATE_LIMIT_EMAIL_WINDOW_SECONDS", 600),
     )
+
+    # "unknown" (timeout o error de DNS) deja pasar: no bloqueamos por fallos nuestros.
+    dns_timeout_seconds = _env_int("MX_DNS_TIMEOUT_MS", 1000) / 1000
+    if check_mx(redis_client, domain, dns_timeout_seconds) == NO_MAIL:
+        raise HTTPException(status_code=400, detail="domain_cannot_receive_mail")
     return {"status": "ok"}

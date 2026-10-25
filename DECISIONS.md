@@ -92,6 +92,9 @@ copia estatica en el repositorio.
 - Detrás de un proxy, request.client.host sería la IP del proxy; no se confía en X-Forwarded-For.
 - En local con Docker, todas mis pruebas comparten una misma IP.
 - Ventana fija: ráfagas posibles en el borde.
+- Los endpoints son síncronos y corren en un grupo limitado de hilos (por defecto 40 en FastAPI, que no he verificado). Una consulta MX lenta ocupa un hilo hasta ~2 s. Con muchas peticiones simultáneas a dominios lentos, el servicio se saturaría aunque el rate limit por IP las frene una a una. No lo arregles hoy.
+- La caché guarda una clave por cada dominio distinto que alguien envíe (TTL de 1 h), así que un atacante puede llenarla de claves arbitrarias. El rate limit lo acota pero no lo elimina.
+- Un dominio solo con AAAA (IPv6) daría no_mail.
 
 ## D15. Valores por defecto de desarrollo en el compose
 - Contexto: .env no se sube es mas bien un clon limpio Postgres fallaba sin contraseña y NFR-1 exige un solo comando.
@@ -107,3 +110,11 @@ copia estatica en el repositorio.
 - Por qué: un valor de configuración malo no puede tumbar el servicio (PR-5), y una ventana en 0 desactivaría el rate limit en silencio.
 - Trade-off: un valor inválido en un límite genera un warning en cada petición (ruidoso, pero visible). Una variable ausente en producción usa el default sin avisar.
 - Verificado en Docker: con "abc" el endpoint responde 200 y el log muestra el warning.
+
+## D18. Verificación MX con caché y fail-open
+- Contexto: un dominio sin servidor de correo no puede recibir mensajes; pero consultar DNS es red externa que no controlo.
+- Decisión: consulto MX (y A como respaldo); Null MX (RFC 7505) y NXDOMAIN cuentan como no_mail → 400. Timeout de 1 s por consulta, resultado ok/no_mail cacheado 1 h en Redis, unknown NO se cachea y deja pasar.
+- Por qué: un fallo de mi DNS no debe bloquear a un usuario real (PR-5); y cachear un timeout dejaría a un dominio legítimo marcado una hora.
+- Trade-off: con caché fría una petición puede tardar hasta ~2 s (MX + A), por encima de los 300 ms; medido ~350 ms con DNS real y 25-40 ms con caché.
+- Limitaciones: un dominio solo con IPv6 (AAAA) daría no_mail; un atacante que provoque timeouts se salta el chequeo (fail-open); endpoint síncrono, una consulta lenta ocupa un hilo; la caché crece con cada dominio distinto (acotada por el rate limit).
+- Pendiente: marcar "no verificado" en el log de auditoría y sumar riesgo en el score.
