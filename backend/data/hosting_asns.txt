@@ -1,0 +1,6 @@
+# EJEMPLOS, NO DATOS REALES: reemplazar con ASN de hosting verificados.
+# Se usan ASN del rango privado 64512-65534 (RFC 6996), que no pertenecen a nadie.
+# Formato: ASN  nombre
+64512  ejemplo-hosting-uno
+64513  ejemplo-hosting-dos
+64514  ejemplo-hosting-tres
