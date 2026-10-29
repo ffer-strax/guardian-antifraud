@@ -14,3 +14,8 @@
 | 24-oct | Verificar el rate limit | Sí (manual) | Mandé un body sin la clave "email" y salió 422 json_invalid | Era error mío de tipeo; lo reenvié bien |
 | 24-oct | Pruebas con Redis caído | Sí | Con Redis detenido todo dio 200 pero más lento (timeouts de 1 s por llamada): rompe el p95 de 300 ms | Documentado como limitación; se medirá en la Fase 2 |
 | 24-oct | Versión de redis | Parcial | El agente eligió redis==5.2.1 de memoria | Verifiqué en pypi.org: existe (6-dic-2024), pero la última es 8.1.0 (30-jul-2026); la mantengo por reproducibilidad |
+| 24-oct | Verificación MX (agente) | Sí | Cambió conftest.py y tests existentes, y lo justificó; reportó pruebas con DNS real hechas por él | Revisé el diff y repetí yo las pruebas con DNS real y Redis detenido |
+| 24-oct | Mis commits | Error mío | El código del MX se subió dentro de un commit de documentación por un push accidental | Lo detecté con `git log -- archivo`; no reescribí el historial |
+| 28-oct | Log del rate limiter | Sí | Mi prueba manual encontró que el warning incluía el correo; la auditoría del agente no lo vio | El agente corrigió y demostró que su test falla con el código viejo; yo comprobé que los dos assert quedaron en líneas separadas |
+| 28-oct | CI en GitHub Actions | Sí | Eligió @v7 sin permissions | Verifiqué las versiones en las páginas de releases y añadí permissions: contents: read |
+

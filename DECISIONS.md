@@ -114,7 +114,8 @@ copia estatica en el repositorio.
 ## D18. Verificación MX con caché y fail-open
 - Contexto: un dominio sin servidor de correo no puede recibir mensajes; pero consultar DNS es red externa que no controlo.
 - Decisión: consulto MX (y A como respaldo); Null MX (RFC 7505) y NXDOMAIN cuentan como no_mail → 400. Timeout de 1 s por consulta, resultado ok/no_mail cacheado 1 h en Redis, unknown NO se cachea y deja pasar.
-- Por qué: un fallo de mi DNS no debe bloquear a un usuario real (PR-5); y cachear un timeout dejaría a un dominio legítimo marcado una hora.
+- Por qué: un timeout es un fallo de mi consulta, no un hecho del dominio; cachearlo dejaría pasar sin verificar durante una hora a un dominio que quizá no recibe correo
 - Trade-off: con caché fría una petición puede tardar hasta ~2 s (MX + A), por encima de los 300 ms; medido ~350 ms con DNS real y 25-40 ms con caché.
 - Limitaciones: un dominio solo con IPv6 (AAAA) daría no_mail; un atacante que provoque timeouts se salta el chequeo (fail-open); endpoint síncrono, una consulta lenta ocupa un hilo; la caché crece con cada dominio distinto (acotada por el rate limit).
 - Pendiente: marcar "no verificado" en el log de auditoría y sumar riesgo en el score.
+
