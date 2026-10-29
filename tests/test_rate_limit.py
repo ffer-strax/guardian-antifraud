@@ -51,3 +51,18 @@ def test_redis_down_still_returns_200(monkeypatch, caplog):
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
     assert "Redis no disponible" in caplog.text
+
+
+def test_redis_down_log_has_limit_type_but_no_personal_data(monkeypatch, caplog):
+    broken = redis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.5)
+    monkeypatch.setattr(main, "redis_client", broken)
+
+    with caplog.at_level(logging.WARNING):
+        response = client.post("/register", json={"email": "maria.perez@example.com"})
+
+    assert response.status_code == 200
+    assert "rate limit de ip" in caplog.text
+    assert "rate limit de email" in caplog.text
+    # TestClient se conecta con la IP "testclient": es lo que recibe request.client.host.
+    assert "testclient" not in caplog.text
+    assert "maria.perez" not in caplog.text
