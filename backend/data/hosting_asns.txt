@@ -8,3 +8,9 @@
 213230   Hetzner Cloud - Ashburn
 8075     Microsoft Corporation
 14061    DigitalOcean LLC
+# Fuente: bgp.tools, consultado el 29-oct-2026 (primeros 8)
+# Fuente: db-ip.com y networksdb.io, consultados el 29-oct-2026 (siguientes 4)
+396982   Google LLC (Google Cloud)
+16276    OVH SAS
+63949    Akamai Technologies (Linode)
+20473    The Constant Company, LLC (Vultr)
