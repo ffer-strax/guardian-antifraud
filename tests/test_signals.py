@@ -61,6 +61,15 @@ def test_es_ip_with_canary_timezone_matches(debug_mode):
         "country": "ES",
         "timezone_matches_country": True,
         "device_family_size": None,
+        "form_too_fast": None,
+        "keystroke_uniform": None,
+        "dwell_uniform": None,
+        "mouse_linear": None,
+        "no_mouse_movement": None,
+        "no_keyboard_events": None,
+        "behavior_missing": True,
+        "time_to_submit_ms": None,
+        "pointer_kind": None,
     }
 
 
@@ -91,6 +100,15 @@ def test_invalid_header_is_ignored(debug_mode):
         "country": None,
         "timezone_matches_country": None,
         "device_family_size": None,
+        "form_too_fast": None,
+        "keystroke_uniform": None,
+        "dwell_uniform": None,
+        "mouse_linear": None,
+        "no_mouse_movement": None,
+        "no_keyboard_events": None,
+        "behavior_missing": True,
+        "time_to_submit_ms": None,
+        "pointer_kind": None,
     }
 
 
@@ -116,10 +134,11 @@ def test_hosting_ip_with_mismatched_timezone_requires_verification(debug_mode, m
     body = response.json()
     assert body["status"] == "verification_required"
     assert body["debug_risk"] == {
-        "score": 35,
+        "score": 45,
         "action": "step_up",
-        "reasons": ["hosting_ip", "tz_country_mismatch"],
-        "unverified": ["device_reuse_low", "device_reuse_high"],
+        "reasons": ["hosting_ip", "tz_country_mismatch", "behavior_missing"],
+        "unverified": ["device_reuse_low", "device_reuse_high", "form_too_fast", "keystroke_uniform", "dwell_uniform",
+                       "mouse_linear", "no_mouse_movement", "no_keyboard_events"],
     }
 
 
@@ -128,7 +147,7 @@ def test_normal_ip_is_allowed(debug_mode):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["debug_risk"]["score"] == 0
+    assert body["debug_risk"]["score"] == 10
     assert body["debug_risk"]["action"] == "allow"
 
 

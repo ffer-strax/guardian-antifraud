@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 
+from services.behavior_signals import SIGNAL_NAMES as BEHAVIOR_SIGNAL_NAMES
 from services.geo_lookup import NO_COUNTRY_TIMEZONES
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,14 @@ WEIGHTS = {
     "tz_utc": 5,                # El navegador reporta una zona sin país (UTC, GMT, CET...).
     "device_reuse_low": 15,     # El mismo dispositivo ya registró 1 o 2 cuentas más.
     "device_reuse_high": 35,    # El mismo dispositivo ya registró 3 o más cuentas (granja).
+    # Comportamiento: pesos HIPOTÉTICOS, a validar con la línea base humana (umbrales en behavior_signals.py).
+    "form_too_fast": 30,        # Formulario enviado antes de 2 s desde que cargó la página.
+    "keystroke_uniform": 25,    # 8+ teclas con tiempo entre teclas casi constante (desviación < 15 ms).
+    "dwell_uniform": 15,        # 8+ teclas con tiempo de pulsación casi constante (desviación < 8 ms).
+    "mouse_linear": 20,         # Ratón con 20+ muestras en línea casi recta (rectitud > 0.98).
+    "no_mouse_movement": 5,     # Hay ratón pero no se movió nada.
+    "no_keyboard_events": 10,   # El correo apareció sin teclas, sin pegar y sin autocompletar.
+    "behavior_missing": 10,     # El cliente no mandó el bloque de comportamiento, o era inválido.
 }
 
 # Puntaje mínimo de cada acción, de menor a mayor: 0-29 allow, 30-59 step_up, 60-84 review, 85-100 block.
@@ -72,6 +81,14 @@ def _device_reuse_high(signals: dict) -> bool | None:
     return size >= 3
 
 
+def _precomputed(name: str):
+    """Regla de comportamiento: el valor ya viene calculado en behavior_signals; solo se lee."""
+    def rule(signals: dict) -> bool | None:
+        value = signals.get(name)
+        return value if isinstance(value, bool) else None
+    return rule
+
+
 # Cada regla devuelve True (se cumple), False (no se cumple) o None (no se pudo comprobar).
 _RULES = {
     "hosting_ip": _hosting_ip,
@@ -79,6 +96,7 @@ _RULES = {
     "tz_utc": _tz_utc,
     "device_reuse_low": _device_reuse_low,
     "device_reuse_high": _device_reuse_high,
+    **{name: _precomputed(name) for name in BEHAVIOR_SIGNAL_NAMES},
 }
 
 

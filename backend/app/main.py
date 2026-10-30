@@ -4,7 +4,7 @@ import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import redis
 
@@ -13,7 +13,8 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from services import asn_lookup, audit_log, fingerprint_match, fingerprint_store, geo_lookup, risk_engine
+from services import (asn_lookup, audit_log, behavior_signals, fingerprint_match, fingerprint_store,
+                      geo_lookup, risk_engine)
 from services.email_utils import canonicalize_email, is_disposable
 from services.mx_checker import NO_MAIL, check_mx
 from services.rate_limiter import check_rate_limit
@@ -207,6 +208,9 @@ class RegisterRequest(BaseModel):
     # Zona horaria del navegador (ej. "Europe/Madrid"); opcional. Más de 64 caracteres -> 422.
     timezone: str | None = Field(default=None, max_length=64)
     fingerprint: Fingerprint | None = None
+    # Any a propósito: un bloque inválido no debe dar 422; se valida aparte en
+    # behavior_signals.parse_behavior y, si no sirve, se ignora entero.
+    behavior: Any = None
 
 
 # En el repo es <raíz>/frontend; en Docker, /code/app/main.py -> /frontend (volumen de docker-compose).
@@ -267,9 +271,12 @@ def register(payload: RegisterRequest, request: Request, background_tasks: Backg
     fingerprint = fingerprint_match.flatten(
         payload.fingerprint.model_dump() if payload.fingerprint else None, payload.timezone
     )
+    behavior = behavior_signals.parse_behavior(payload.behavior)
     signals = {
         **_compute_signals(signals_ip, payload.timezone),
         "device_family_size": _device_family_size(fingerprint, email_hmac),
+        # Solo booleanos, time_to_submit_ms y pointer_kind: los demás agregados no se guardan.
+        **behavior_signals.compute_behavior_signals(behavior),
     }
     risk = risk_engine.evaluate({**signals, "timezone": payload.timezone})
 

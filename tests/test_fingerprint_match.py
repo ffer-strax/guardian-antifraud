@@ -105,7 +105,8 @@ def test_device_reuse_rules(size, reasons):
     result = evaluate({"is_hosting": False, "timezone_matches_country": True,
                        "timezone": "Europe/Madrid", "device_family_size": size})
     assert result.reasons == reasons
-    assert result.unverified == []
+    assert result.unverified == ["form_too_fast", "keystroke_uniform", "dwell_uniform", "mouse_linear",
+        "no_mouse_movement", "no_keyboard_events", "behavior_missing"]
 
 
 # --- Integración con /register ---
@@ -121,9 +122,10 @@ def test_farm_of_six_accounts_reaches_device_reuse_high(fake_audit, fake_fingerp
     sizes = [record["signals"]["device_family_size"] for record in fake_audit]
     reasons = [record["reasons"] for record in fake_audit]
     assert sizes == [0, 1, 2, 3, 4, 5]
-    assert reasons == [[], ["device_reuse_low"], ["device_reuse_low"],
-                       ["device_reuse_high"], ["device_reuse_high"], ["device_reuse_high"]]
-    # A partir de la cuarta cuenta: 35 puntos -> step_up.
+    assert reasons == [["behavior_missing"], ["device_reuse_low", "behavior_missing"],
+                       ["device_reuse_low", "behavior_missing"], ["device_reuse_high", "behavior_missing"],
+                       ["device_reuse_high", "behavior_missing"], ["device_reuse_high", "behavior_missing"]]
+    # A partir de la cuarta cuenta: 35 + 10 (sin bloque behavior) = 45 puntos -> step_up.
     assert [record["action"] for record in fake_audit] == ["allow"] * 3 + ["step_up"] * 3
     assert len(fake_fingerprints.rows) == 6
 

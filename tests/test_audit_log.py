@@ -46,10 +46,11 @@ def test_engine_decision_is_audited(fake_audit, hosting_setup):
 
     assert len(fake_audit) == 1
     record = fake_audit[0]
-    assert record["score"] == 35
+    assert record["score"] == 45
     assert record["action"] == "step_up"
-    assert record["reasons"] == ["hosting_ip", "tz_country_mismatch"]
-    assert record["unverified"] == ["device_reuse_low", "device_reuse_high"]
+    assert record["reasons"] == ["hosting_ip", "tz_country_mismatch", "behavior_missing"]
+    assert record["unverified"] == ["device_reuse_low", "device_reuse_high", "form_too_fast", "keystroke_uniform", "dwell_uniform",
+                       "mouse_linear", "no_mouse_movement", "no_keyboard_events"]
     assert record["ip"] == HOSTING_IP
     assert (record["asn"], record["country"], record["timezone"]) == (64512, "US", "Europe/Madrid")
 
@@ -80,7 +81,7 @@ def test_real_ip_has_no_simulated_mark(fake_audit, hosting_setup):
 def test_allow_is_audited(fake_audit):
     assert _register().json() == {"status": "ok"}
     assert fake_audit[0]["action"] == "allow"
-    assert fake_audit[0]["score"] == 0
+    assert fake_audit[0]["score"] == 10
 
 
 def test_plain_email_never_in_record(fake_audit):
