@@ -23,7 +23,7 @@ Proyecto del reto técnico "GUARDIÁN" (empresa ficticia: Conecta). Python 3.11+
   - [ ] ~~Detección de fuga WebRTC~~ — **no implementada** (recorte por tiempo)
   - [ ] ~~Listas de reputación públicas (FireHOL, Spamhaus DROP)~~ — **no implementadas** (recorte por tiempo)
 - [x] **Fase 3 — Huellas de dispositivo** (versión reducida: colector en JavaScript + similitud ponderada por atributo)
-- [ ] **Fase 4 — Biometría de comportamiento** (versión mínima: formulario sin eventos de teclado y formulario completado demasiado rápido)
+- [x] **Fase 4 — Biometría de comportamiento** (versión mínima: formulario sin eventos de teclado y formulario completado demasiado rápido)
 - [ ] **Fase 5 — Grafo de cuentas** (detección de granjas de ≥ 4 cuentas). *No se implementa el modelo de ML.*
 - [ ] **Fase 6 — Evasión adversaria** (3 bots con Playwright, campaña de ≥ 100 registros, tabla de evasión)
 

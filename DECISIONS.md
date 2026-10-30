@@ -218,3 +218,40 @@ Qué pierdo con esto:
 - No hay caducidad: una huella guardada hoy sigue contando mientras exista en la tabla.
 Cómo lo comprobé: tests con un almacén falso (el mismo dispositivo con el navegador actualizado, dos dispositivos distintos y una granja de 6 cuentas), a mano contra un Postgres real, y desde mi navegador: el cuarto registro del mismo dispositivo dio verification_required.
 Para ETHICS.md: ahora guardo datos que identifican un dispositivo. En producción haría falta decidir cuánto tiempo se guardan y guardar solo lo necesario.
+
+## D30 — Comportamiento: agregados en el cliente, sin eventos crudos
+
+**Decisión:** el colector calcula en el navegador agregados de teclado y ratón
+(tiempos entre teclas, duración de cada pulsación, qué tan recto es el recorrido
+del ratón, tiempo hasta enviar el formulario) y manda solo esos números. De ahí
+salen 7 señales con pesos: form_too_fast 30, keystroke_uniform 25, mouse_linear 20,
+dwell_uniform 15, no_keyboard_events 10, behavior_missing 10, no_mouse_movement 5.
+
+**Por qué:** el ritmo de tecleo y el movimiento del ratón son más difíciles de
+imitar que una IP o una zona horaria, así que pesan más. Enviar solo agregados
+reduce los datos personales: nunca sale qué tecla se pulsó ni coordenadas.
+
+**Alternativas descartadas:**
+- Enviar los eventos crudos y analizarlos en el servidor: más flexible, pero
+  guarda datos que pueden revelar lo que escribe una persona (ver ETHICS.md).
+- Un modelo de aprendizaje automático: sin datos reales etiquetados sería inventar
+  resultados (ver D19).
+
+**Costo (trade-off):**
+- behavior_missing penaliza a quien no manda el bloque. Atrapa al bot que llama a
+  la API sin navegador, pero también a una persona con JavaScript bloqueado.
+  Por eso pesa solo 10: no basta para pasar de "permitir".
+- Con pocos datos (menos de 8 teclas o 20 movimientos) la señal queda en None, no
+  en False: "no se pudo comprobar" no es lo mismo que "se comprobó y está bien".
+- En móvil no hay ratón: las señales de ratón se anulan. Un bot puede aprovechar
+  esa exención declarando que es táctil. (Lo probaremos en la Fase 6.)
+- Un bot con Playwright puede imitar tiempos humanos. Estas señales suben el costo
+  del ataque, no lo impiden.
+
+**Estado de validación:** los umbrales (15, 8, 0.98, 2000 ms) son hipótesis. [Aquí
+pon el resultado de tu línea base: cuántos registros hiciste y si alguno disparó
+una señal.]
+
+**Qué me haría cambiar de opinión:** que mi propia línea base o la campaña de la
+Fase 6 muestre que una persona real dispara una señal de peso alto, o que el bot
+de Nivel 3 las evada todas con poco esfuerzo.

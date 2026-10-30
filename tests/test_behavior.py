@@ -14,7 +14,7 @@ from services.risk_engine import evaluate
 
 client = TestClient(main.app)
 
-# Comportamiento de una persona normal: ninguna señal se cumple.
+# Comportamiento de una persona normal: ninguna señal se cumple. Valores de ejemplo.
 HUMAN = {
     "key_count": 20,
     "dwell_mean_ms": 95.0,
@@ -47,7 +47,7 @@ def _signals(**changes):
 
 # --- Cada señal en su umbral exacto ---
 
-def test_example_human_triggers_nothing():
+def test_human_baseline_triggers_nothing():
     result = _signals()
     assert all(result[name] is False for name in SIX_SIGNALS)
     assert result["behavior_missing"] is False
