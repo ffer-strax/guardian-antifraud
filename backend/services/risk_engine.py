@@ -16,6 +16,8 @@ WEIGHTS = {
     "hosting_ip": 25,           # La IP pertenece a un ASN de hosting/nube (AWS, Hetzner...).
     "tz_country_mismatch": 10,  # La zona del navegador no es de ninguna del país de la IP.
     "tz_utc": 5,                # El navegador reporta una zona sin país (UTC, GMT, CET...).
+    "device_reuse_low": 15,     # El mismo dispositivo ya registró 1 o 2 cuentas más.
+    "device_reuse_high": 35,    # El mismo dispositivo ya registró 3 o más cuentas (granja).
 }
 
 # Puntaje mínimo de cada acción, de menor a mayor: 0-29 allow, 30-59 step_up, 60-84 review, 85-100 block.
@@ -56,11 +58,27 @@ def _tz_utc(signals: dict) -> bool | None:
     return timezone.strip() in NO_COUNTRY_TIMEZONES
 
 
+def _device_reuse_low(signals: dict) -> bool | None:
+    size = signals.get("device_family_size")
+    if size is None:
+        return None
+    return 1 <= size <= 2
+
+
+def _device_reuse_high(signals: dict) -> bool | None:
+    size = signals.get("device_family_size")
+    if size is None:
+        return None
+    return size >= 3
+
+
 # Cada regla devuelve True (se cumple), False (no se cumple) o None (no se pudo comprobar).
 _RULES = {
     "hosting_ip": _hosting_ip,
     "tz_country_mismatch": _tz_country_mismatch,
     "tz_utc": _tz_utc,
+    "device_reuse_low": _device_reuse_low,
+    "device_reuse_high": _device_reuse_high,
 }
 
 

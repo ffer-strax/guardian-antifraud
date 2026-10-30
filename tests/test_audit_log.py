@@ -49,7 +49,7 @@ def test_engine_decision_is_audited(fake_audit, hosting_setup):
     assert record["score"] == 35
     assert record["action"] == "step_up"
     assert record["reasons"] == ["hosting_ip", "tz_country_mismatch"]
-    assert record["unverified"] == []
+    assert record["unverified"] == ["device_reuse_low", "device_reuse_high"]
     assert record["ip"] == HOSTING_IP
     assert (record["asn"], record["country"], record["timezone"]) == (64512, "US", "Europe/Madrid")
 

@@ -2,7 +2,7 @@ import dns.rdata
 import pytest
 
 from app import main
-from services import audit_log, mx_checker
+from services import audit_log, fingerprint_store, mx_checker
 
 
 class FakeRedis:
@@ -58,3 +58,32 @@ def fake_audit(monkeypatch):
     records = []
     monkeypatch.setattr(audit_log, "write_audit", records.append)
     return records
+
+
+class FakeFingerprintStore:
+    """Imita la tabla device_fingerprints en una lista. Con fail=True la lectura falla como un Postgres caído."""
+
+    def __init__(self):
+        self.rows = []
+        self.fail = False
+
+    def query(self, fingerprint, limit):
+        if self.fail:
+            raise ConnectionError("postgres caído")
+        keys = fingerprint_store.STABLE_KEYS
+        matches = [row for row in self.rows if all(row[key] == fingerprint[key] for key in keys)]
+        # Igual que ORDER BY created_at DESC LIMIT: las más recientes primero.
+        return list(reversed(matches))[:limit]
+
+    def save(self, record):
+        self.rows.append(record)
+
+
+@pytest.fixture(autouse=True)
+def fake_fingerprints(monkeypatch):
+    # Ningún test toca Postgres: se reemplazan solo la consulta y la escritura;
+    # find_candidates (timeout, atributos faltantes) sigue siendo el real.
+    fake = FakeFingerprintStore()
+    monkeypatch.setattr(fingerprint_store, "_query_candidates", fake.query)
+    monkeypatch.setattr(fingerprint_store, "save_fingerprint", fake.save)
+    return fake

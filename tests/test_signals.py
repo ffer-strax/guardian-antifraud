@@ -60,6 +60,7 @@ def test_es_ip_with_canary_timezone_matches(debug_mode):
         "is_hosting": False,
         "country": "ES",
         "timezone_matches_country": True,
+        "device_family_size": None,
     }
 
 
@@ -89,6 +90,7 @@ def test_invalid_header_is_ignored(debug_mode):
         "is_hosting": None,
         "country": None,
         "timezone_matches_country": None,
+        "device_family_size": None,
     }
 
 
@@ -117,7 +119,7 @@ def test_hosting_ip_with_mismatched_timezone_requires_verification(debug_mode, m
         "score": 35,
         "action": "step_up",
         "reasons": ["hosting_ip", "tz_country_mismatch"],
-        "unverified": [],
+        "unverified": ["device_reuse_low", "device_reuse_high"],
     }
 
 

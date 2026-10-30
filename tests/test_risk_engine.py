@@ -24,7 +24,8 @@ def test_threshold_limits(score, action):
 
 def test_clean_request_scores_zero():
     result = evaluate(CLEAN)
-    assert (result.score, result.action, result.reasons, result.unverified) == (0, ALLOW, [], [])
+    assert (result.score, result.action, result.reasons, result.unverified) == (
+        0, ALLOW, [], ["device_reuse_low", "device_reuse_high"])
 
 
 def test_hosting_alone_is_25_allow():
@@ -46,7 +47,7 @@ def test_utc_timezone_adds_tz_utc():
     result = evaluate({"is_hosting": False, "timezone_matches_country": None, "timezone": "UTC"})
     assert result.score == 5
     assert result.reasons == ["tz_utc"]
-    assert result.unverified == ["tz_country_mismatch"]
+    assert result.unverified == ["tz_country_mismatch", "device_reuse_low", "device_reuse_high"]
 
 
 def test_none_signals_add_zero_and_are_unverified():
@@ -54,7 +55,8 @@ def test_none_signals_add_zero_and_are_unverified():
     assert result.score == 0
     assert result.action == ALLOW
     assert result.reasons == []
-    assert result.unverified == ["hosting_ip", "tz_country_mismatch", "tz_utc"]
+    assert result.unverified == ["hosting_ip", "tz_country_mismatch", "tz_utc",
+                                 "device_reuse_low", "device_reuse_high"]
 
 
 def test_score_is_capped_at_100():

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from services import asn_lookup, audit_log, geo_lookup, risk_engine
+from services import asn_lookup, audit_log, fingerprint_match, fingerprint_store, geo_lookup, risk_engine
 from services.email_utils import canonicalize_email, is_disposable
 from services.mx_checker import NO_MAIL, check_mx
 from services.rate_limiter import check_rate_limit
@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI):
     geo_lookup.get_country_timezones()
     # Si Postgres aún no está listo, la app arranca igual y la tabla se crea en la primera escritura.
     audit_log.ensure_table()
+    fingerprint_store.ensure_table()
     if audit_log.uses_dev_hmac_key():
         logger.warning(
             "AUDIT_HMAC_KEY vacía: se usa la clave de desarrollo para el HMAC del correo. "
@@ -128,6 +129,24 @@ _ACTION_RESPONSES = {
     risk_engine.REVIEW: (202, "pending_review"),
     risk_engine.BLOCK: (403, "blocked"),
 }
+
+# Decisiones cuya huella se guarda para comparar registros futuros (block y rechazos no).
+_STORE_FINGERPRINT_ACTIONS = {risk_engine.ALLOW, risk_engine.STEP_UP, risk_engine.REVIEW}
+
+
+def _device_family_size(fingerprint: dict | None, email_hmac: str) -> int | None:
+    """Otras cuentas con el mismo dispositivo; None si no hay huella o no se pudo buscar."""
+    if fingerprint is None:
+        return None
+    candidates = fingerprint_store.find_candidates(fingerprint)
+    if candidates is None:
+        return None
+    try:
+        return fingerprint_match.family_size(fingerprint, email_hmac, candidates)
+    except Exception as exc:
+        # Una señal que falla queda sin verificar; nunca un 500.
+        logger.warning("Fallo al contar la familia de dispositivos: %s", type(exc).__name__)
+        return None
 
 
 def _audit_record(canonical: str, ip: str, ip_simulated: bool, timezone: str | None, action: str,
@@ -244,13 +263,24 @@ def register(payload: RegisterRequest, request: Request, background_tasks: Backg
         return _reject(background_tasks, record, "domain_cannot_receive_mail")
 
     # El rate limit de arriba siempre usa la IP real; el header de debug solo afecta aquí.
-    signals = _compute_signals(signals_ip, payload.timezone)
+    email_hmac = audit_log.email_hmac(canonical)
+    fingerprint = fingerprint_match.flatten(
+        payload.fingerprint.model_dump() if payload.fingerprint else None, payload.timezone
+    )
+    signals = {
+        **_compute_signals(signals_ip, payload.timezone),
+        "device_family_size": _device_family_size(fingerprint, email_hmac),
+    }
     risk = risk_engine.evaluate({**signals, "timezone": payload.timezone})
 
     # Se escribe después de enviar la respuesta: el audit no suma latencia.
     record = _audit_record(canonical, signals_ip, ip_simulated, payload.timezone, risk.action,
                            risk.reasons, signals, risk)
     background_tasks.add_task(audit_log.write_audit, record)
+    # La huella de un "block" no se guarda: no debe contar como dispositivo conocido para nadie.
+    if fingerprint is not None and risk.action in _STORE_FINGERPRINT_ACTIONS:
+        background_tasks.add_task(fingerprint_store.save_fingerprint,
+                                  {**fingerprint, "email_hmac": email_hmac, "ip": signals_ip})
 
     status_code, status = _ACTION_RESPONSES[risk.action]
     response = {"status": status}
