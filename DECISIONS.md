@@ -125,3 +125,47 @@ copia estatica en el repositorio.
 - Números medidos por ti: carga 2.92 s, 123.2 MiB retenidos, pico de 139.1 MiB, 24.6 µs por consulta.
 
 # Limitaciones: la carga perezosa hace que la primera petición espere ~3 s (hay que cargar al arrancar); la base vacía por fallo no se reintenta; solo IPv4; cada proceso cargaría su propia copia en memoria.
+
+## D23: Señal de zona horaria vs. país de la IP
+
+Contexto: el navegador muestra su zona horaria y la IP muestra un país.
+Si no coinciden, puede ser un bot o un VPN. Pero países como España
+tienen varias zonas válidas (Europe/Madrid, Africa/Ceuta,
+Atlantic/Canary), así que comparo contra TODAS las zonas del país, no
+contra una sola.
+
+Decisión:
+- El mapa país -> zonas sale de zone.tab (tzdata 2026c), se genera con
+  un script y se versiona. El servicio no lee zone.tab en runtime.
+- Agregué 124 nombres antiguos (Asia/Calcutta, Europe/Kiev) desde
+  tzdata.zi, cada uno solo al país de su nombre actual, para no penalizar
+  a navegadores que aún los reportan.
+- Nombres sin país (UTC, GMT, CET, EST y similares, 29 en total) dan
+  None: sin información, no se penaliza desde esta función.
+- Un timezone desconocido que no está en esa lista da False.
+
+Por qué: es una señal débil y fácil de falsear. Nunca decide sola y su
+peso es bajo. Prefiero no penalizar a un humano por un detalle de
+configuración antes que castigarlo sin evidencia.
+
+## D24: Mi propio buscador de ASN
+Qué problema había: necesito saber de qué red es una IP (por ejemplo, si es de Amazon o de un proveedor de casa). La librería pyasn no se instala en la imagen de Docker: no trae versión precompilada y la imagen slim no tiene el compilador gcc.
+Qué elegí: escribí mi propio buscador en Python. Guardo los prefijos agrupados por longitud y busco desde el más largo (/32) hasta el más corto (/0). El primero que coincide gana, así que un /24 le gana a un /16. Usé pyasn una sola vez, fuera del proyecto, para convertir los datos de Routeviews (29-oct-2026, 1,159,994 prefijos) a un archivo que sí versioné (4 MB comprimido).
+Qué descarté y por qué: pyasn en producción, porque obligaría a instalar un compilador en la imagen y a depender de una versión que solo declara soporte hasta 3.11. También descarté recorrer todas las redes una por una en cada consulta, porque con más de un millón de prefijos sería demasiado lento para el límite de 300 ms.
+Qué pierdo con esto: tengo que mantener mi propio código. El archivo de datos es una foto de un día y se va quedando viejo. No encontré una licencia explícita de Routeviews y lo digo en ETHICS.md. Y el buscador usa unos 123 MiB de memoria por proceso.
+Cómo lo comprobé: carga en 2.92 s y 24.6 microsegundos por consulta, medido con scripts/measure_asn.py. Hay tests para el prefijo más largo, IP privadas, IPv6 y archivos dañados.
+
+## D25: Leer las IP con inet_pton y no con ipaddress
+Qué problema había: al cargar el archivo, convertir 1.16 millones de líneas con el módulo ipaddress tardaba 37 segundos.
+Qué elegí: usar socket.inet_pton al cargar, que tarda unos 3 segundos. Cuando llega una IP de un cliente sí uso ipaddress, porque ahí necesito saber si es privada o de loopback, y es una sola IP por petición.
+Qué descarté y por qué: ipaddress para la carga, porque 37 s es inaceptable al arrancar. Esto lo decidí con una medición, no con una suposición.
+Qué pierdo con esto: el código es un poco menos claro y depende de cómo el sistema operativo entiende las direcciones. Por eso hay tests que revisan que las líneas mal formadas se salten una por una.
+
+## D26: País de la IP con DB-IP Lite
+Qué problema había: necesito el país de cada IP, sin pagar (NFR-3).
+Qué elegí: DB-IP Lite, versión país, octubre de 2026. Es gratis, con licencia CC BY 4.0, y la uso con atribución. El archivo trae 710,834 filas; al cargar solo conservo 362,108 rangos IPv4 y verifiqué el MD5 contra el publicado. Carga en 1.2 s y usa 31 MiB.
+Qué descarté y por qué: las bases que piden registrarse con una cuenta y una clave de licencia (verifica esto antes de afirmarlo en la defensa), porque complican el docker-compose up de un solo comando.
+Qué pierdo con esto: es menos exacta que la versión de pago (su propio índice de exactitud es 81 contra 93). Solo da país, no ciudad. Ignoro IPv6, así que un usuario con IPv6 se queda sin país. Y hay que poner el enlace "IP Geolocation by DB-IP" en las páginas que usen estos datos.
+
+## D27: Zona horaria contra país (el caso de Canarias)
+Qué problema había: si la
