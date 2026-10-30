@@ -4,9 +4,10 @@ import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import networkx as nx
 import pytest
 
-from services.account_graph import FarmCluster, build_graph, detect_farms
+from services.account_graph import EDGE_FAMILIES, FarmCluster, build_graph, detect_farms
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -202,3 +203,119 @@ def test_evaluation_script_runs_on_small_data():
     assert len(result["sweep"]) == 12
     assert set(result["fraud_groups"]) == {"datacenter_bot", "device_reuse_farm", "residential_proxy_farm"}
     assert "Barrido" in detect_farms_script.report(result, "prueba")
+
+
+# --- v2: regla de ráfaga y regla de evidencia fuerte ---
+
+V1 = {"burst_rule": False, "strong_evidence": False}
+
+
+def _similar_only(count):
+    # El mismo modelo de equipo con canvas distinto (similitud 0.80), cada cuenta en su propia red.
+    return [_account(f"s{n}", n, f"5.{n + 1}.0.1", {**DEVICE, "canvasHash": f"{n:064x}"}) for n in range(count)]
+
+
+def test_chain_of_40_hour_gaps_is_not_flagged():
+    # A-B-C-D a 40 h entre consecutivas (120 h de tramo), misma IP y mismo equipo.
+    chain = [_account(f"k{n}", n * 40, "5.1.0.1") for n in range(4)]
+    assert detect_farms(chain) == []
+    # v1 sí lo marcaba: es el encadenamiento que corta la regla de ráfaga.
+    assert [c.size for c in detect_farms(chain, **V1)] == [4]
+
+
+def test_four_accounts_same_ip_within_ten_minutes_are_flagged():
+    burst = [_account(f"r{n}", n * 3 / 60, "5.1.0.1", _other_device(n)) for n in range(4)]
+    clusters = detect_farms(burst)
+    assert [c.accounts for c in clusters] == [("r0", "r1", "r2", "r3")]
+    assert clusters[0].span_hours <= 10 / 60
+
+
+def test_cluster_joined_only_by_fuzzy_similarity_is_not_flagged():
+    accounts = _similar_only(4)
+    graph = build_graph(accounts)
+    assert graph.number_of_edges() > 0
+    assert all(data["types"] == {"similar_device"} for _, _, data in graph.edges(data=True))
+    assert detect_farms(accounts) == []
+    assert [c.size for c in detect_farms(accounts, **V1)] == [4]
+
+
+def test_account_with_only_weak_edge_is_not_added_to_strong_cluster():
+    farm = [_account(f"f{n}", n, "5.1.0.1") for n in range(4)]
+    lookalike = _account("x", 2, "5.9.0.1", {**DEVICE, "canvasHash": "c" * 64})
+    accounts = farm + [lookalike]
+    assert _types(build_graph(accounts), "f0", "x") == {"similar_device"}
+    assert [c.accounts for c in detect_farms(accounts)] == [("f0", "f1", "f2", "f3")]
+    assert [c.size for c in detect_farms(accounts, **V1)] == [5]
+
+
+def test_overlapping_bursts_use_disjoint_windows():
+    # Horas 0, 1, 2, 3, 47.5, 48.5, 49 y 50: la primera ventana se queda con 0..47.5, y 48.5, 49
+    # y 50 quedan fuera porque solo cumplían junto a 47.5, que ya está usada.
+    hours = [0, 1, 2, 3, 47.5, 48.5, 49, 50]
+    accounts = [_account(f"w{n}", hour, "5.1.0.1") for n, hour in enumerate(hours)]
+    assert [c.accounts for c in detect_farms(accounts)] == [("w0", "w1", "w2", "w3", "w4")]
+
+
+def test_each_rule_fixes_its_own_problem():
+    chain = [_account(f"k{n}", n * 40, "5.1.0.1") for n in range(4)]
+    fuzzy = _similar_only(4)
+    # Solo evidencia fuerte: la cadena (aristas fuertes) sigue marcada; el grupo difuso ya no.
+    assert detect_farms(chain, burst_rule=False) != []
+    assert detect_farms(fuzzy, burst_rule=False) == []
+    # Solo ráfaga: el grupo difuso (todo en 3 h) sigue marcado; la cadena ya no.
+    assert detect_farms(fuzzy, strong_evidence=False) != []
+    assert detect_farms(chain, strong_evidence=False) == []
+
+
+def _v1_reference(accounts):
+    """v1 escrita aparte: componentes conexos filtrados por tamaño y familias, nada más."""
+    graph = build_graph(accounts)
+    clusters = []
+    for component in nx.connected_components(graph):
+        if len(component) < 4:
+            continue
+        types = sorted({t for _, _, data in graph.subgraph(component).edges(data=True) for t in data["types"]})
+        families = sorted({EDGE_FAMILIES[t] for t in types})
+        if len(families) < 1:
+            continue
+        times = sorted((graph.nodes[node]["created"], graph.nodes[node]["created_at"]) for node in component)
+        clusters.append(FarmCluster(tuple(sorted(component)), len(component), tuple(types), tuple(families),
+                                    times[0][1], times[-1][1], round((times[-1][0] - times[0][0]) / 3600, 2)))
+    return sorted(clusters, key=lambda c: (c.first_created_at, c.accounts))
+
+
+def test_rules_off_reproduce_v1_exactly(synthetic_accounts):
+    expected = _v1_reference(synthetic_accounts)
+    assert expected  # Que la comparación no sea trivial.
+    assert detect_farms(synthetic_accounts, **V1) == expected
+
+
+@pytest.mark.parametrize("burst, strong", [(False, False), (True, False), (False, True), (True, True)])
+def test_every_variant_ignores_truth_and_is_deterministic(synthetic_accounts, burst, strong):
+    options = {"burst_rule": burst, "strong_evidence": strong}
+    expected = detect_farms(synthetic_accounts, **options)
+    removed = [{k: v for k, v in a.items() if k not in ("label", "archetype", "group_id")}
+               for a in synthetic_accounts]
+    assert detect_farms(removed, **options) == expected
+    reordered = list(synthetic_accounts)
+    random.Random(2).shuffle(reordered)
+    assert detect_farms(reordered, **options) == expected
+
+
+def test_v2_clusters_never_span_more_than_the_window(synthetic_accounts):
+    for window in (6, 24, 48, 168):
+        for cluster in detect_farms(synthetic_accounts, window_hours=window):
+            assert cluster.span_hours <= window
+            assert cluster.size >= 4
+
+
+def test_evaluation_compares_four_variants():
+    config = simulate_fraud.Config(normal=30, households=3, shared_ip_users=30)
+    accounts = simulate_fraud.generate(config, [16509])["accounts"]
+    result = detect_farms_script.evaluate(accounts, window_hours=48, min_size=4, min_families=1,
+                                          device_sim=0.75, hub_max=25)
+    assert list(result["variants"]) == [name for name, _, _ in detect_farms_script.VARIANTS]
+    assert result["variant"] == "v2 (ambas)"
+    text = detect_farms_script.report(result, "prueba")
+    assert "Comparación de variantes" in text
+    assert "Pérdida de recall" in text

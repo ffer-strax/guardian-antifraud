@@ -31,6 +31,18 @@ GROUP_DETECTED_SHARE = 0.80
 SWEEP_WINDOWS = (6, 24, 48, 168)
 SWEEP_MIN_SIZES = (3, 4, 6)
 
+# Variantes del detector para la tabla comparativa: (nombre, burst_rule, strong_evidence).
+VARIANTS = (
+    ("v1 (sin reglas)", False, False),
+    ("solo ráfaga", True, False),
+    ("solo evidencia fuerte", False, True),
+    ("v2 (ambas)", True, True),
+)
+
+
+def _variant_name(burst_rule: bool, strong_evidence: bool) -> str:
+    return next(name for name, burst, strong in VARIANTS if (burst, strong) == (burst_rule, strong_evidence))
+
 
 def _owner(account: dict) -> str:
     # Los usuarios normales no tienen grupo: cada uno es su propio "grupo" de una cuenta.
@@ -131,14 +143,22 @@ def cross_group_similarity(accounts: list[dict], threshold: float, window_hours:
     return {"pairs_total": total, "pairs_within_window": within}
 
 
-def sweep(accounts: list[dict], min_families: int, device_sim: float, hub_max: int) -> list[dict]:
+def _hide_truth(accounts: list[dict]) -> list[dict]:
+    """Copia de las cuentas SIN la verdad de referencia: es lo único que ve el detector."""
+    return [{k: v for k, v in a.items() if k not in ("label", "archetype", "group_id")} for a in accounts]
+
+
+def sweep(accounts: list[dict], min_families: int, device_sim: float, hub_max: int,
+          burst_rule: bool, strong_evidence: bool) -> list[dict]:
     rows = []
+    hidden = _hide_truth(accounts)
     fraud_groups = sum(len(_groups(accounts, k)) for k in _archetypes(accounts, "fraud"))
     for window in SWEEP_WINDOWS:
         for min_size in SWEEP_MIN_SIZES:
             clusters = account_graph.detect_farms(
-                accounts, window_hours=window, min_cluster_size=min_size, min_evidence_families=min_families,
-                device_sim_threshold=device_sim, hub_max_accounts=hub_max)
+                hidden, window_hours=window, min_cluster_size=min_size, min_evidence_families=min_families,
+                device_sim_threshold=device_sim, hub_max_accounts=hub_max,
+                burst_rule=burst_rule, strong_evidence=strong_evidence)
             flagged = {account_id for c in clusters for account_id in c.accounts}
             detected = sum(v["detected"] for v in fraud_group_detection(accounts, flagged).values())
             legit_flagged = sum(1 for a in accounts if a["label"] == "legit" and a["account_id"] in flagged)
@@ -149,18 +169,65 @@ def sweep(accounts: list[dict], min_families: int, device_sim: float, hub_max: i
     return rows
 
 
-def evaluate(accounts: list[dict], *, window_hours: float, min_size: int, min_families: int,
-             device_sim: float, hub_max: int) -> dict:
-    # 1) Detección SIN la verdad de referencia: se le pasan cuentas sin label/archetype/group_id.
-    hidden = [{k: v for k, v in a.items() if k not in ("label", "archetype", "group_id")} for a in accounts]
-    clusters = account_graph.detect_farms(
-        hidden, window_hours=window_hours, min_cluster_size=min_size, min_evidence_families=min_families,
-        device_sim_threshold=device_sim, hub_max_accounts=hub_max)
+def variant_summary(accounts: list[dict], clusters: list) -> dict:
+    """Una fila de la tabla comparativa."""
     flagged = {account_id for c in clusters for account_id in c.accounts}
+    metrics = account_metrics(accounts, flagged)
+    return {
+        "precision": metrics["precision"],
+        "recall": metrics["recall"],
+        "fraud_groups": fraud_group_detection(accounts, flagged),
+        "fraud_accounts_flagged": {
+            archetype: sum(1 for a in accounts if a["archetype"] == archetype and a["account_id"] in flagged)
+            for archetype in _archetypes(accounts, "fraud")
+        },
+        "legit_accounts_flagged": {
+            archetype: value["accounts_flagged"]
+            for archetype, value in legit_false_positives(accounts, flagged).items()
+        },
+        "mixed_clusters": len(mixed_clusters(accounts, clusters)),
+    }
+
+
+def recall_losses(variants: dict) -> list[dict]:
+    """Arquetipos de fraude que cada variante detecta PEOR que v1 (grupos o cuentas)."""
+    baseline = variants["v1 (sin reglas)"]
+    losses = []
+    for name, summary in variants.items():
+        for archetype, groups in summary["fraud_groups"].items():
+            before_groups = baseline["fraud_groups"][archetype]["detected"]
+            before_accounts = baseline["fraud_accounts_flagged"][archetype]
+            after_accounts = summary["fraud_accounts_flagged"][archetype]
+            if groups["detected"] < before_groups or after_accounts < before_accounts:
+                losses.append({"variant": name, "archetype": archetype,
+                               "groups": f"{before_groups} -> {groups['detected']} de {groups['total']}",
+                               "accounts": f"{before_accounts} -> {after_accounts}"})
+    return losses
+
+
+def evaluate(accounts: list[dict], *, window_hours: float, min_size: int, min_families: int,
+             device_sim: float, hub_max: int, burst_rule: bool = account_graph.BURST_RULE,
+             strong_evidence: bool = account_graph.STRONG_EVIDENCE) -> dict:
+    # 1) Detección SIN la verdad de referencia: se le pasan cuentas sin label/archetype/group_id.
+    hidden = _hide_truth(accounts)
+    thresholds = {"window_hours": window_hours, "min_cluster_size": min_size,
+                  "min_evidence_families": min_families, "device_sim_threshold": device_sim,
+                  "hub_max_accounts": hub_max}
+    clusters = account_graph.detect_farms(hidden, **thresholds, burst_rule=burst_rule,
+                                          strong_evidence=strong_evidence)
+    flagged = {account_id for c in clusters for account_id in c.accounts}
+    # Las 4 variantes con los mismos umbrales, para compararlas entre sí.
+    variants = {
+        name: variant_summary(accounts, account_graph.detect_farms(hidden, **thresholds, burst_rule=burst,
+                                                                    strong_evidence=strong))
+        for name, burst, strong in VARIANTS
+    }
     # 2) Medición: recién aquí se usa la verdad de referencia.
     return {
         "parameters": {"window_hours": window_hours, "min_size": min_size, "min_families": min_families,
-                       "device_sim": device_sim, "hub_max": hub_max},
+                       "device_sim": device_sim, "hub_max": hub_max, "burst_rule": burst_rule,
+                       "strong_evidence": strong_evidence},
+        "variant": _variant_name(burst_rule, strong_evidence),
         "accounts": len(accounts),
         "labels": dict(sorted(Counter(a["label"] for a in accounts).items())),
         "clusters": [asdict(c) for c in clusters],
@@ -170,8 +237,36 @@ def evaluate(accounts: list[dict], *, window_hours: float, min_size: int, min_fa
         "legit_false_positives": legit_false_positives(accounts, flagged),
         "mixed_clusters": mixed_clusters(accounts, clusters),
         "cross_group_similarity": cross_group_similarity(accounts, device_sim, window_hours),
-        "sweep": sweep(accounts, min_families, device_sim, hub_max),
+        "sweep": sweep(accounts, min_families, device_sim, hub_max, burst_rule, strong_evidence),
+        "variants": variants,
+        "recall_losses": recall_losses(variants),
     }
+
+
+# Nombres cortos para que la tabla comparativa quepa en la terminal.
+SHORT_NAMES = {"datacenter_bot": "dc_bot", "residential_proxy_farm": "proxy", "device_reuse_farm": "dev_farm",
+               "internet_cafe": "cafe", "normal": "normal", "shared_household": "hogar",
+               "shared_ip_noise": "ip_comp"}
+
+
+def _variant_table(variants: dict) -> list[str]:
+    first = next(iter(variants.values()))
+    fraud = list(first["fraud_groups"])
+    legit = list(first["legit_accounts_flagged"])
+    lines = [
+        "   variante              | precisión | recall | grupos de fraude detectados  | "
+        "cuentas legítimas marcadas     | mezclados",
+        "                         |           |        | " + " ".join(f"{SHORT_NAMES.get(k, k):>8}" for k in fraud)
+        + " | " + " ".join(f"{SHORT_NAMES.get(k, k):>7}" for k in legit) + " |",
+    ]
+    for name, summary in variants.items():
+        groups = " ".join(f"{summary['fraud_groups'][k]['detected']}/{summary['fraud_groups'][k]['total']}".rjust(8)
+                          for k in fraud)
+        legits = " ".join(f"{summary['legit_accounts_flagged'][k]:>7}" for k in legit)
+        lines.append(f"   {name:<22}| {_fmt(summary['precision']):>9} | {_fmt(summary['recall']):>6} | "
+                     f"{groups} | {legits} | {summary['mixed_clusters']:>9}")
+    lines.append("   (" + ", ".join(f"{SHORT_NAMES.get(k, k)}={k}" for k in fraud + legit) + ")")
+    return lines
 
 
 def report(result: dict, source: str) -> str:
@@ -180,6 +275,8 @@ def report(result: dict, source: str) -> str:
     lines = [
         f"Detector de granjas sobre {source}",
         f"Cuentas: {result['accounts']} ({', '.join(f'{k} {v}' for k, v in result['labels'].items())})",
+        f"Variante: {result['variant']} (ráfaga={'sí' if p['burst_rule'] else 'no'}, "
+        f"evidencia fuerte={'sí' if p['strong_evidence'] else 'no'})",
         f"Parámetros: ventana {p['window_hours']} h, tamaño mínimo {p['min_size']}, familias mínimas "
         f"{p['min_families']}, similitud {p['device_sim']}, hub > {p['hub_max']} cuentas",
         "",
@@ -214,13 +311,22 @@ def report(result: dict, source: str) -> str:
         f"6) Parejas de cuentas de grupos distintos con similitud >= {p['device_sim']}:",
         f"   en total: {s['pairs_total']}   dentro de la ventana de {p['window_hours']} h: {s['pairs_within_window']}",
         "",
-        "7) Barrido de sensibilidad (recall de grupos de fraude / cuentas legítimas marcadas):",
+        f"7) Barrido de sensibilidad, variante {result['variant']} "
+        "(recall de grupos de fraude / cuentas legítimas marcadas):",
         "   ventana h | min-size | clústeres | grupos fraude detectados | recall grupos | legítimas marcadas",
     ]
     for row in result["sweep"]:
         lines.append(f"   {row['window_hours']:>9} | {row['min_size']:>8} | {row['clusters']:>9} | "
                      f"{row['fraud_groups_detected']:>10}/{row['fraud_groups_total']:<13} | "
                      f"{_fmt(row['fraud_group_recall']):>13} | {row['legit_accounts_flagged']:>18}")
+    lines += ["", "8) Comparación de variantes (mismos umbrales que arriba):"]
+    lines += _variant_table(result["variants"])
+    lines += ["", "9) Pérdida de recall frente a v1 (por arquetipo de fraude):"]
+    if not result["recall_losses"]:
+        lines.append("   Ninguna variante pierde grupos ni cuentas de fraude frente a v1.")
+    for loss in result["recall_losses"]:
+        lines.append(f"   - {loss['variant']}: {loss['archetype']} pierde recall "
+                     f"(grupos {loss['groups']}, cuentas de fraude marcadas {loss['accounts']})")
     return "\n".join(lines)
 
 
@@ -232,6 +338,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--min-families", type=int, default=account_graph.MIN_EVIDENCE_FAMILIES)
     parser.add_argument("--device-sim", type=float, default=account_graph.DEVICE_SIM_THRESHOLD)
     parser.add_argument("--hub-max", type=int, default=account_graph.HUB_MAX_ACCOUNTS)
+    parser.add_argument("--burst-rule", action=argparse.BooleanOptionalAction, default=account_graph.BURST_RULE,
+                        help="Regla de ráfaga de v2 (--no-burst-rule para apagarla)")
+    parser.add_argument("--strong-evidence", action=argparse.BooleanOptionalAction,
+                        default=account_graph.STRONG_EVIDENCE,
+                        help="Regla de evidencia fuerte de v2 (--no-strong-evidence para apagarla)")
     parser.add_argument("--json-out", type=Path, default=None, help="Guarda también el resultado en JSON")
     return parser.parse_args(argv)
 
@@ -242,7 +353,8 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(f"No existe {args.input}. Genéralo primero con: python scripts/simulate_fraud.py")
     accounts = json.loads(args.input.read_text(encoding="utf-8"))["accounts"]
     result = evaluate(accounts, window_hours=args.window_hours, min_size=args.min_size,
-                      min_families=args.min_families, device_sim=args.device_sim, hub_max=args.hub_max)
+                      min_families=args.min_families, device_sim=args.device_sim, hub_max=args.hub_max,
+                      burst_rule=args.burst_rule, strong_evidence=args.strong_evidence)
     print(report(result, args.input))
     if args.json_out:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)
