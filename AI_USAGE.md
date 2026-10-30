@@ -30,4 +30,8 @@
 | 29-oct | Comando de prueba en PowerShell | No | Se me dio una sintaxis de Linux (`VAR=true docker compose`) que PowerShell no entiende. | Usé `$env:VAR="true"; docker compose ...`. |
 | 24-oct | Commit accidental de la capa MX | No | Un push accidental subió el código MX dentro del commit "agregando documentacion". | No reescribí el historial. Lo dejé registrado aquí y en `git log`. |
 | — | Hipótesis sobre qué commit contenía el MX | No | El asesor (Claude) afirmó que era `e8ee37f`; era `77e28ae`. | Lo comprobé con `git log` en vez de creerle. |
+| 29-oct | Audit log en PostgreSQL | Sí, con revisión | Reportó 13 tests nuevos y eran 12 (141 menos 129). | Verifiqué el total corriendo los tests yo mismo. |
+| 29-oct | Tareas en segundo plano con los 400 | Sí | n/a | El agente detectó solo que FastAPI no ejecuta BackgroundTasks si el endpoint lanza HTTPException, y cambió los dos 400 a JSONResponse con el mismo cuerpo y código. |
+| 29-oct | Qué IP guardar en el audit | Parcial | El agente recomendó la IP real de la conexión, que en Docker siempre es 172.18.0.1 y le habría mostrado al grafo toda la campaña como una granja. | Elegí la IP usada para las señales (lo hablé con el asistente de revisión) y pedí la marca ip_simulated, que el agente agregó con tests. |
+| 29-oct | Prueba de la marca ip_simulated | Parcial | Mis primeras pruebas manuales fallaron por lanzar la petición antes de que la app terminara de arrancar. | Esperé a que /health respondiera y repetí la prueba; la fila salió con la marca. |
 
