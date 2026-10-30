@@ -221,7 +221,7 @@ Para ETHICS.md: ahora guardo datos que identifican un dispositivo. En producció
 
 ## D30 — Comportamiento: agregados en el cliente, sin eventos crudos
 
-**Decisión:** el colector calcula en el navegador agregados de teclado y ratón
+**Decisión:** el colector calcula en el navegador comportamientos de teclado y ratón
 (tiempos entre teclas, duración de cada pulsación, qué tan recto es el recorrido
 del ratón, tiempo hasta enviar el formulario) y manda solo esos números. De ahí
 salen 7 señales con pesos: form_too_fast 30, keystroke_uniform 25, mouse_linear 20,
@@ -237,7 +237,7 @@ reduce los datos personales: nunca sale qué tecla se pulsó ni coordenadas.
 - Un modelo de aprendizaje automático: sin datos reales etiquetados sería inventar
   resultados (ver D19).
 
-**Costo (trade-off):**
+**Costo:**
 - behavior_missing penaliza a quien no manda el bloque. Atrapa al bot que llama a
   la API sin navegador, pero también a una persona con JavaScript bloqueado.
   Por eso pesa solo 10: no basta para pasar de "permitir".
@@ -274,11 +274,8 @@ una misma ventana de 48 h, y cada cuenta marcada debe tener al menos una arista 
 juntos aunque A y C estén a 80 h) y que la similitud difusa unía a usuarios normales
 (2269 parejas de grupos distintos superan 0.75). Agregué dos reglas, una por problema.
 
-**Alternativas descartadas:** unir por similitud difusa sin ventana; subir el umbral
-de similitud (rompe el caso del navegador que se actualiza); un modelo de ML (D19:
-sin datos reales etiquetados sería circular).
 
-**Costo (trade-off):**
+**Costo :**
 - Un cibercafé con 4 o más personas registradas en 48 h desde el mismo equipo y la
   misma IP es indistinguible de una granja con estas señales. Con 5 semillas distintas
   la precisión de v2 fue 0.917–1.000; los fallos son ese caso.
@@ -294,3 +291,19 @@ se sostiene del todo fuera de ella.
 
 **Qué me haría cambiar de opinión:** ver el detector marcar a un cibercafé real, o
 una granja lenta que se le escape.
+
+**Cómo separaría un cibercafé de una granja (no implementado):** con las señales de
+comportamiento de D30. Las personas distintas en un mismo equipo escriben a su
+ritmo; un script repite el mismo patrón (formulario muy rápido, ritmo uniforme). El
+grafo solo marcaría un "candidato" y el motor de riesgo lo combinaría con esas
+señales. Esto es razonamiento de diseño, no un resultado: no lo medí porque las
+probabilidades de comportamiento del generador son supuestos míos, y medirlo sería
+circular. Un bot que imite comportamiento humano (Fase 6) lo debilita.
+
+**Limitación de integración:** el grafo corre por lotes sobre el JSON sintético y no
+está conectado a /register. Los datos que necesita sí existen en PostgreSQL
+(audit_log y device_fingerprints guardan created_at, ip y huella, y email_hmac sirve
+de llave), pero no hay un cargador. Además, device_fingerprints solo guarda cuentas
+allow/step_up/review: las bloqueadas no entrarían al grafo.
+
+
