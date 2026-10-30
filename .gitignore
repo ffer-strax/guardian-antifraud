@@ -4,3 +4,5 @@ __pycache__/
 
 .env.*
 !.env.example
+# Salida del generador sintético (se regenera igual con scripts/simulate_fraud.py)
+data/synthetic_accounts.json
