@@ -248,10 +248,15 @@ reduce los datos personales: nunca sale qué tecla se pulsó ni coordenadas.
 - Un bot con Playwright puede imitar tiempos humanos. Estas señales suben el costo
   del ataque, no lo impiden.
 
-**Estado de validación:** los umbrales (15, 8, 0.98, 2000 ms) son hipótesis. [Aquí
-pon el resultado de tu línea base: cuántos registros hiciste y si alguno disparó
-una señal.]
-
-**Qué me haría cambiar de opinión:** que mi propia línea base o la campaña de la
-Fase 6 muestre que una persona real dispara una señal de peso alto, o que el bot
-de Nivel 3 las evada todas con poco esfuerzo.
+**Estado de validación:** medí 5 registros míos, a mano, en un solo navegador y con
+un solo ratón. Ninguna señal de comportamiento se activó. Entre las muestras con 8 o
+más teclas: flight_std 1522–23 211 ms contra umbral 15; dwell_std 117–170 ms contra
+8; straightness 0.02–0.81 contra 0.98; tiempo de envío 11–237 s contra 2 s. El
+detector de pegado marcó paste_used=true en la muestra donde pegué. Esto NO valida
+los umbrales: es una persona, un dispositivo y 5 muestras (dos de ellas de varios
+minutos, por ser sesiones de prueba); solo muestra que no marcan como bot a alguien
+que escribe con normalidad. Sin medir: pegado puro sin teclear, autocompletado del
+navegador (una muestra con 24 caracteres y 4 teclas sin marca de pegado sugiere que
+no se detecta) y escritura rápida con prisa. Además, los umbrales de uniformidad
+(15 ms y 8 ms) son muy bajos frente a lo que medí: solo atraparían a bots con
+retardo constante. Lo pondré a prueba con el bot de Nivel 2 en la Fase 6.

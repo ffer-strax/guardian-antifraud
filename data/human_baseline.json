@@ -1,0 +1,11 @@
+{
+  "description": "Mediciones del autor al registrarse a mano en http://localhost:8000/. Una persona, un navegador, un ratón. No valida umbrales: solo los contrasta.",
+  "collected": "2026-10-30",
+  "samples": [
+    {"key_count": 4,  "dwell_mean_ms": 98.8,  "dwell_std_ms": 81.6,  "flight_mean_ms": 350.3,  "flight_std_ms": 245.8,   "paste_used": false, "mouse_move_count": 41,  "straightness": 0.8064, "speed_cv": 0.945,  "click_count": 3,  "pointer_kind": "mouse", "time_to_submit_ms": 11170.3},
+    {"key_count": 26, "dwell_mean_ms": 219.6, "dwell_std_ms": 138.7, "flight_mean_ms": 726.6,  "flight_std_ms": 1966.3,  "paste_used": false, "mouse_move_count": 71,  "straightness": 0.2466, "speed_cv": 1.0496, "click_count": 5,  "pointer_kind": "mouse", "time_to_submit_ms": 22497},
+    {"key_count": 44, "dwell_mean_ms": 205.1, "dwell_std_ms": 117.4, "flight_mean_ms": 575.5,  "flight_std_ms": 1521.8,  "paste_used": false, "mouse_move_count": 95,  "straightness": 0.1571, "speed_cv": 0.9906, "click_count": 8,  "pointer_kind": "mouse", "time_to_submit_ms": 29916.5},
+    {"key_count": 55, "dwell_mean_ms": 197.7, "dwell_std_ms": 134.8, "flight_mean_ms": 4420.6, "flight_std_ms": 22291,    "paste_used": false, "mouse_move_count": 296, "straightness": 0.0343, "speed_cv": 1.139,  "click_count": 16, "pointer_kind": "mouse", "time_to_submit_ms": 179498.1, "note": "sesion de prueba larga, ~3 min"},
+    {"key_count": 58, "dwell_mean_ms": 210.6, "dwell_std_ms": 169.7, "flight_mean_ms": 5641.1, "flight_std_ms": 23211.1,  "paste_used": true,  "mouse_move_count": 380, "straightness": 0.0235, "speed_cv": 1.1129, "click_count": 20, "pointer_kind": "mouse", "time_to_submit_ms": 237493.8, "note": "tecleo y pegado mezclados, ~4 min"}
+  ]
+}
