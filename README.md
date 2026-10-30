@@ -82,7 +82,7 @@ Orden de los chequeos:
 2. Canonicalización del correo y dominio desechable (400)
 3. Límite por correo canónico (429)
 4. Verificación MX del dominio (400 si no puede recibir correo)
-5. Cálculo de señales (ASN, hosting, país, zona horaria)
+5. Cálculo de señales (ASN, hosting, país, zona horaria, reutilización de dispositivo)
 6. Motor de riesgo: puntaje y acción
 
 ### Señales y pesos actuales
@@ -92,6 +92,8 @@ Orden de los chequeos:
 | IP de hosting / datacenter | 25 | ASN en la lista de hosting |
 | Zona horaria no coincide con el país de la IP | 10 | Se compara con **todas** las zonas del país |
 | Zona horaria `UTC` | 5 | Ambigua: servidores sin cabeza, pero también humanos |
+| Dispositivo reutilizado por 1 o 2 cuentas más | 15 | Huellas con similitud ≥ 0.75 y otro correo |
+| Dispositivo reutilizado por 3 o más cuentas | 35 | Patrón de granja de cuentas |
 
 Los pesos son **hipótesis**, no hechos comprobados; se validan en la Fase 6. Ninguna señal sola bloquea.
 
@@ -104,7 +106,7 @@ Los pesos son **hipótesis**, no hechos comprobados; se validan en la Fase 6. Ni
 | 60–84 | Cola de revisión manual | 202 `{"status":"pending_review"}` |
 | 85–100 | Bloquear | 403 `{"status":"blocked"}` |
 
-Con los pesos actuales el máximo posible es 35, así que hoy solo ocurren "permitir" y "pedir verificación". Revisión y bloqueo se alcanzarán al sumar las señales de comportamiento, dispositivo y grafo. La respuesta normal **no** incluye puntaje ni razones, para no revelar las reglas.
+Con los pesos actuales el máximo posible es 70 (hosting + zona que no coincide + dispositivo reutilizado por 3 o más cuentas), así que ya ocurren "permitir", "pedir verificación" y "revisión". Bloqueo se alcanzará al sumar las señales de comportamiento y grafo. La respuesta normal **no** incluye puntaje ni razones, para no revelar las reglas.
 
 ### Degradación elegante
 
@@ -167,12 +169,22 @@ Ver `.env.example`.
 ## Limitaciones conocidas
 
 - La verificación en dos pasos no está implementada: solo existe el estado `verification_required`.
-- Revisión y bloqueo son inalcanzables hasta agregar señales de comportamiento, dispositivo y grafo.
+- Bloqueo es inalcanzable hasta agregar señales de comportamiento y grafo: hoy el puntaje máximo es 70 (hosting 25 + zona que no coincide 10 + dispositivo reutilizado 35) y bloqueo empieza en 85. Revisión ya se alcanza con esa combinación.
 - Solo IPv4: las IPv6 quedan sin país.
 - La latencia total de `/register` no está medida de punta a punta. La primera consulta MX de un dominio puede superar los 300 ms, y con Redis caído la espera puede ser mucho mayor (ver `DECISIONS.md`).
 - Un bot que falsea su zona horaria para que coincida con su IP pasa esa señal.
 - La clasificación por ASN es aproximada: un ASN de hosting puede contener rangos de otras organizaciones.
 - Los pesos y umbrales no están calibrados con datos reales.
+
+Limitaciones de la comparación de huellas (detalle en `DECISIONS.md`, D29):
+
+- Solo comparo contra las 200 huellas más recientes que tengan la misma plataforma, el mismo número de núcleos y la misma pantalla. En una configuración muy común (por ejemplo Windows, 8 núcleos y 1920x1080) esas 200 se agotan rápido, y una cuenta antigua de una granja puede quedar fuera de la comparación.
+- Un atacante que cambie uno de esos cuatro valores en cada cuenta evita la comparación, porque el índice solo encuentra candidatos que coinciden exactamente en ellos.
+- Si cambian a la vez el canvas y el renderizador de WebGL, la similitud baja a 0.60 y deja de contar como el mismo dispositivo.
+- Dos equipos idénticos (mismo modelo, mismo navegador) pueden salir como "el mismo dispositivo". La huella es una señal suave, no una identificación.
+- Una huella con un campo del índice vacío no se compara (queda "no verificada"), así que un bot que no manda su huella no recibe penalización por reutilización.
+- La lectura de candidatos ocurre dentro de la petición. Con Postgres caído cada registro con huella espera hasta 150 ms más.
+- No hay caducidad: una huella guardada hoy sigue contando mientras exista en la tabla.
 
 ---
 
