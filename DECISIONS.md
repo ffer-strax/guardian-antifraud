@@ -169,3 +169,26 @@ Qué pierdo con esto: es menos exacta que la versión de pago (su propio índice
 
 ## D27: Zona horaria contra país (el caso de Canarias)
 Qué problema había: si la
+
+## D28: Audit log en PostgreSQL (PR-4)
+Qué problema había: cada decisión debe quedar registrada con las señales que la produjeron, y sin guardar el correo en claro.
+Qué elegí:
+- Una tabla audit_log en PostgreSQL con la fecha, el correo cifrado, la IP, el ASN, el país, la zona horaria, las señales, el puntaje, la acción y las razones.
+- El correo se guarda como HMAC-SHA256 con una clave secreta (AUDIT_HMAC_KEY). Un hash simple se podría revertir probando correos conocidos.
+- La escritura ocurre después de responder (BackgroundTasks), para no sumar tiempo a los 300 ms. Por eso los dos rechazos 400 ahora devuelven una respuesta en vez de lanzar una excepción: FastAPI no ejecuta las tareas en segundo plano si el endpoint lanza una. El código y el cuerpo de la respuesta son los mismos.
+- La tabla se crea al arrancar (CREATE TABLE IF NOT EXISTS). Si Postgres no está listo, la app arranca igual y la crea en la primera escritura.
+- Los rechazos 400 (dominio desechable, sin MX) se guardan como "rejected" con puntaje vacío, para no mezclarlos con los bloqueos del motor de riesgo.
+- La columna ip guarda la IP usada para las señales. En modo debug eso puede ser una IP simulada, y en ese caso se marca "ip_simulated": true dentro de signals.
+- No se audita el 429 ni el 422: un ataque de volumen inundaría la tabla.
+- psycopg 3 con binario incluido (psycopg[binary]==3.3.6), sin ORM ni migraciones.
+Qué descarté y por qué:
+- SQLAlchemy y un sistema de migraciones: demasiado para lo que necesito y más difícil de explicar.
+- Guardar la IP real de la conexión: dentro de Docker es siempre 172.18.0.1, y en la Fase 5 el grafo vería toda la campaña como una sola granja.
+- psycopg con libpq del sistema: obliga a cambiar el Dockerfile.
+Qué pierdo con esto:
+- Si Postgres está caído, esa decisión se pierde: no hay cola ni reintento. El audit es de mejor esfuerzo.
+- Si Postgres no responde (en vez de rechazar), cada escritura espera hasta 2 s ocupando un hilo.
+- Una conexión nueva por escritura (sin pool).
+- La IP se guarda en claro y el log de acceso de uvicorn también la imprime. En producción iría truncada a /24 y con retención limitada (va en ETHICS.md).
+- La clave HMAC y la contraseña de Postgres tienen valores de desarrollo por defecto. Nunca en producción.
+Cómo lo comprobé: tests con un escritor falso (la CI no tiene Postgres), y a mano contra un Postgres real: filas correctas, sin correo en claro, 200 con Postgres detenido y aviso sin datos personales.
