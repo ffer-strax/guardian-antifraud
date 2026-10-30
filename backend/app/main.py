@@ -6,12 +6,12 @@ from dataclasses import asdict
 
 import redis
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from pydantic import BaseModel, EmailStr, Field
 
-from services import asn_lookup, geo_lookup, risk_engine
+from services import asn_lookup, audit_log, geo_lookup, risk_engine
 from services.email_utils import canonicalize_email, is_disposable
 from services.mx_checker import NO_MAIL, check_mx
 from services.rate_limiter import check_rate_limit
@@ -37,6 +37,13 @@ async def lifespan(app: FastAPI):
     asn_db = asn_lookup.get_default_db()
     geo_db = geo_lookup.get_default_geo_db()
     geo_lookup.get_country_timezones()
+    # Si Postgres aún no está listo, la app arranca igual y la tabla se crea en la primera escritura.
+    audit_log.ensure_table()
+    if audit_log.uses_dev_hmac_key():
+        logger.warning(
+            "AUDIT_HMAC_KEY vacía: se usa la clave de desarrollo para el HMAC del correo. "
+            "Nunca en producción."
+        )
     if _debug_ip_header_enabled():
         logger.warning(
             "DEBUG_CLIENT_IP_HEADER=true: el header %s reemplaza la IP de las señales. "
@@ -121,6 +128,35 @@ _ACTION_RESPONSES = {
 }
 
 
+def _audit_record(canonical: str, ip: str, ip_simulated: bool, timezone: str | None, action: str,
+                  reasons: list[str], signals: dict | None = None,
+                  risk: risk_engine.RiskResult | None = None) -> dict:
+    """Arma la fila del audit log. El correo solo viaja como HMAC, nunca en claro."""
+    audit_signals = dict(signals) if signals else None
+    if ip_simulated:
+        # Marca las filas cuya IP vino del header de debug, también en los 400 (signals NULL).
+        audit_signals = {**(audit_signals or {}), "ip_simulated": True}
+    return {
+        "email_hmac": audit_log.email_hmac(canonical),
+        "ip": ip,
+        "asn": signals["asn"] if signals else None,
+        "country": signals["country"] if signals else None,
+        "timezone": timezone,
+        "signals": audit_signals,
+        "score": risk.score if risk else None,
+        "action": action,
+        "reasons": reasons,
+        "unverified": risk.unverified if risk else None,
+    }
+
+
+def _reject(background_tasks: BackgroundTasks, record: dict, detail: str) -> JSONResponse:
+    # Mismo cuerpo que daba HTTPException; se devuelve en vez de lanzarse porque
+    # FastAPI no ejecuta las BackgroundTasks cuando el endpoint lanza una excepción.
+    background_tasks.add_task(audit_log.write_audit, record)
+    return JSONResponse(status_code=400, content={"detail": detail})
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     # Zona horaria del navegador (ej. "Europe/Madrid"); opcional. Más de 64 caracteres -> 422.
@@ -133,7 +169,7 @@ def health() -> dict:
 
 
 @app.post("/register")
-def register(payload: RegisterRequest, request: Request) -> JSONResponse:
+def register(payload: RegisterRequest, request: Request, background_tasks: BackgroundTasks) -> JSONResponse:
     # La IP sale de la conexión TCP, nunca de cabeceras que manda el cliente.
     ip = request.client.host if request.client else "unknown"
     _enforce_limit(
@@ -142,10 +178,16 @@ def register(payload: RegisterRequest, request: Request) -> JSONResponse:
         _env_int("RATE_LIMIT_IP_WINDOW_SECONDS", 60),
     )
 
+    # El audit guarda la misma IP que usan las señales (la del header de debug si está activo).
+    signals_ip = _signals_ip(ip, request)
+    ip_simulated = signals_ip != ip
+
     canonical = canonicalize_email(payload.email)
     domain = canonical.rpartition("@")[2]
     if is_disposable(domain):
-        raise HTTPException(status_code=400, detail="disposable_domain")
+        record = _audit_record(canonical, signals_ip, ip_simulated, payload.timezone,
+                               audit_log.REJECTED, ["disposable_domain"])
+        return _reject(background_tasks, record, "disposable_domain")
 
     _enforce_limit(
         f"rl:email:{canonical}",
@@ -156,11 +198,18 @@ def register(payload: RegisterRequest, request: Request) -> JSONResponse:
     # "unknown" (timeout o error de DNS) deja pasar: no bloqueamos por fallos nuestros.
     dns_timeout_seconds = _env_int("MX_DNS_TIMEOUT_MS", 1000) / 1000
     if check_mx(redis_client, domain, dns_timeout_seconds) == NO_MAIL:
-        raise HTTPException(status_code=400, detail="domain_cannot_receive_mail")
+        record = _audit_record(canonical, signals_ip, ip_simulated, payload.timezone,
+                               audit_log.REJECTED, ["domain_cannot_receive_mail"])
+        return _reject(background_tasks, record, "domain_cannot_receive_mail")
 
     # El rate limit de arriba siempre usa la IP real; el header de debug solo afecta aquí.
-    signals = _compute_signals(_signals_ip(ip, request), payload.timezone)
+    signals = _compute_signals(signals_ip, payload.timezone)
     risk = risk_engine.evaluate({**signals, "timezone": payload.timezone})
+
+    # Se escribe después de enviar la respuesta: el audit no suma latencia.
+    record = _audit_record(canonical, signals_ip, ip_simulated, payload.timezone, risk.action,
+                           risk.reasons, signals, risk)
+    background_tasks.add_task(audit_log.write_audit, record)
 
     status_code, status = _ACTION_RESPONSES[risk.action]
     response = {"status": status}

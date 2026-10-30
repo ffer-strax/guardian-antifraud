@@ -12,6 +12,12 @@ services:
       RATE_LIMIT_EMAIL_WINDOW_SECONDS: ${RATE_LIMIT_EMAIL_WINDOW_SECONDS:-}
       MX_DNS_TIMEOUT_MS: ${MX_DNS_TIMEOUT_MS:-}
       DEBUG_CLIENT_IP_HEADER: ${DEBUG_CLIENT_IP_HEADER:-}
+      AUDIT_HMAC_KEY: ${AUDIT_HMAC_KEY:-}
+      # Mismas variables y defaults que el servicio postgres de abajo.
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-guardian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cambia_esto}
+      POSTGRES_DB: ${POSTGRES_DB:-guardian}
     depends_on:
       - postgres
       - redis

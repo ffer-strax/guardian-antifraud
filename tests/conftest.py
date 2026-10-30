@@ -2,7 +2,7 @@ import dns.rdata
 import pytest
 
 from app import main
-from services import mx_checker
+from services import audit_log, mx_checker
 
 
 class FakeRedis:
@@ -50,3 +50,11 @@ def fake_dns(monkeypatch):
         return [dns.rdata.from_text("IN", "MX", "10 mx.test.")]
 
     monkeypatch.setattr(mx_checker, "_resolve", resolve)
+
+
+@pytest.fixture(autouse=True)
+def fake_audit(monkeypatch):
+    # Ningún test toca Postgres: cada escritura del audit log queda en esta lista.
+    records = []
+    monkeypatch.setattr(audit_log, "write_audit", records.append)
+    return records

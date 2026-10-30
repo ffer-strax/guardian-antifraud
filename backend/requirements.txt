@@ -5,3 +5,4 @@ httpx==0.28.1
 email-validator==2.2.0
 redis==5.2.1
 dnspython==2.9.0
+psycopg[binary]==3.3.6
