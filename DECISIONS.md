@@ -260,3 +260,37 @@ navegador (una muestra con 24 caracteres y 4 teclas sin marca de pegado sugiere 
 no se detecta) y escritura rápida con prisa. Además, los umbrales de uniformidad
 (15 ms y 8 ms) son muy bajos frente a lo que medí: solo atraparían a bots con
 retardo constante. Lo pondré a prueba con el bot de Nivel 2 en la Fase 6.
+
+## D31 — Grafo de cuentas: ventana de tiempo, evidencia fuerte y ráfagas
+
+**Decisión:** conecto cuentas por dispositivo exacto, misma IP y mismo /24 (aristas
+fuertes) y por similitud de huella (arista débil). Una arista solo cuenta si las dos
+cuentas se crearon con menos de 48 h de diferencia. Las IPs o /24 con más de 25
+cuentas se ignoran (escuelas, CGNAT). Una granja es un grupo de >= 4 cuentas dentro de
+una misma ventana de 48 h, y cada cuenta marcada debe tener al menos una arista fuerte.
+
+**Por qué:** la primera versión (solo componentes conexos) marcó a 53 legítimos
+(precisión 0.654). Medí la causa: el encadenamiento (A–B a 40 h y B–C a 40 h quedan
+juntos aunque A y C estén a 80 h) y que la similitud difusa unía a usuarios normales
+(2269 parejas de grupos distintos superan 0.75). Agregué dos reglas, una por problema.
+
+**Alternativas descartadas:** unir por similitud difusa sin ventana; subir el umbral
+de similitud (rompe el caso del navegador que se actualiza); un modelo de ML (D19:
+sin datos reales etiquetados sería circular).
+
+**Costo (trade-off):**
+- Un cibercafé con 4 o más personas registradas en 48 h desde el mismo equipo y la
+  misma IP es indistinguible de una granja con estas señales. Con 5 semillas distintas
+  la precisión de v2 fue 0.917–1.000; los fallos son ese caso.
+- Las ráfagas usan ventanas disjuntas: una granja que cruza el borde de una ventana se
+  parte y puede quedar sin marcar parcialmente.
+- Un atacante paciente (una cuenta por día) queda fuera de cualquier ventana de 48 h.
+  El generador crea todas las granjas en menos de 4 h, así que NO medí este caso.
+
+**Estado de validación:** todo se midió sobre datos que yo generé, y las reglas de v2
+nacieron de los fallos de v1 en esa misma muestra. Los resultados NO se pueden leer
+como desempeño real. Las 5 semillas mostraron que el 1.000 de la muestra original no
+se sostiene del todo fuera de ella.
+
+**Qué me haría cambiar de opinión:** ver el detector marcar a un cibercafé real, o
+una granja lenta que se le escape.
