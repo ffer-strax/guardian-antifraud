@@ -113,18 +113,40 @@ HEADLESS_RENDERERS = [
 ]
 
 
+# Una granja de fraude con menos cuentas no se distingue de un hogar o de ruido.
+MIN_FARM_ACCOUNTS = 4
+
+
 @dataclass(frozen=True)
 class Config:
     seed: int = DEFAULT_SEED
     start: str = DEFAULT_START
     days: int = 60
     normal: int = 400
-    datacenter_bots: int = 20
-    proxy_farm: int = 12
+    farms_per_archetype: int = 5  # Granjas independientes de CADA arquetipo de fraude.
+    datacenter_bots: int = 8      # Los tamaños son cuentas POR GRUPO.
+    proxy_farm: int = 6
     device_farm: int = 6
-    households: int = 20
+    households: int = 20          # Hogares (cada uno con 2 o 3 cuentas).
+    cafes: int = 3
     cafe_accounts: int = 12
+    shared_ips: int = 3
     shared_ip_users: int = 45
+
+
+def validate_config(config: Config) -> str | None:
+    """Mensaje de error si la configuración no sirve; None si está bien."""
+    if config.farms_per_archetype > 0:
+        small = [f"{flag}={size}" for flag, size in (("--datacenter-bots", config.datacenter_bots),
+                                                    ("--proxy-farm", config.proxy_farm),
+                                                    ("--device-farm", config.device_farm))
+                 if size < MIN_FARM_ACCOUNTS]
+        if small:
+            return (f"Cada granja de fraude necesita al menos {MIN_FARM_ACCOUNTS} cuentas; "
+                    f"valores demasiado chicos: {', '.join(small)}")
+    if config.datacenter_bots > 254:
+        return "--datacenter-bots no puede pasar de 254 (las cuentas de una granja comparten un /24)"
+    return None
 
 
 def _parse_start(text: str) -> datetime:
@@ -219,13 +241,15 @@ class _Generator:
         self.group_counters[prefix] = self.group_counters.get(prefix, 0) + 1
         return f"{prefix}-{self.group_counters[prefix]:02d}"
 
-    def _offset_in_window(self, span: int) -> int:
-        """Inicio al azar para un grupo que dura `span` segundos, sin salirse de la ventana."""
-        return self.rng.randint(0, max(0, self.window - span))
+    def _staggered_start(self, index: int, total: int, span: int) -> int:
+        """Inicio del grupo `index` de `total`: la ventana se parte en `total` franjas y cada grupo
+        empieza al azar dentro de la suya, así los del mismo arquetipo no arrancan a la vez."""
+        room = max(0, self.window - span)
+        slot = room // total
+        return index * slot + self.rng.randint(0, slot)
 
-    def _offsets(self, count: int, span: int) -> list[int]:
-        """`count` instantes ordenados dentro de un tramo de `span` segundos desde un inicio al azar."""
-        begin = self._offset_in_window(span)
+    def _offsets(self, count: int, span: int, begin: int) -> list[int]:
+        """`count` instantes ordenados dentro de un tramo de `span` segundos que empieza en `begin`."""
         return sorted(begin + self.rng.randint(0, span) for _ in range(count))
 
     def _add(self, archetype: str, group_id: str | None, offset: int, ip: str, asn: int,
@@ -248,51 +272,54 @@ class _Generator:
 
     # --- Arquetipos de fraude ---
 
+    # Cada grupo pide su propio /24 nuevo y su propio dispositivo (canvas aleatorio de 256 bits):
+    # ningún grupo comparte IP, /24 ni dispositivo con otro, y el grafo no los fusiona por accidente.
+
     def datacenter_bots(self) -> None:
-        """IPs de hosting del mismo /24, huellas distintas pero de baja variedad, en minutos."""
-        count = self.config.datacenter_bots
-        if count == 0:
-            return
-        subnet = self._new_subnet()
-        asn = self.rng.choice(self.hosting_asns)
-        group = self._group_id("datacenter_bot")
-        hosts = self.rng.sample(range(1, 255), count)
-        span = self.rng.randint(5 * MINUTE, 30 * MINUTE)
-        for host, offset in zip(hosts, self._offsets(count, span)):
-            self._add("datacenter_bot", group, offset, f"{subnet}.{host}", asn, True, "US",
-                      self._headless_device(), "UTC")
+        """Por granja: IPs de hosting del mismo /24, huellas distintas pero de baja variedad, en minutos."""
+        farms, count = self.config.farms_per_archetype, self.config.datacenter_bots
+        for index in range(farms):
+            subnet = self._new_subnet()
+            asn = self.rng.choice(self.hosting_asns)
+            group = self._group_id("datacenter_bot")
+            hosts = self.rng.sample(range(1, 255), count)
+            span = self.rng.randint(5 * MINUTE, 30 * MINUTE)
+            begin = self._staggered_start(index, farms, span)
+            for host, offset in zip(hosts, self._offsets(count, span, begin)):
+                self._add("datacenter_bot", group, offset, f"{subnet}.{host}", asn, True, "US",
+                          self._headless_device(), "UTC")
 
     def residential_proxy_farm(self) -> None:
-        """Un /24 distinto por cuenta y sin hosting, pero el mismo dispositivo, en pocas horas."""
-        count = self.config.proxy_farm
-        if count == 0:
-            return
-        device = self._device("MX")
-        # A mitad de la campaña el navegador se actualiza: solo cambia el canvas.
-        updated_canvas = self._canvas_hash()
-        update_at = count // 2
-        group = self._group_id("proxy_farm")
-        span = self.rng.randint(2 * HOUR, 4 * HOUR)
-        for index, offset in enumerate(self._offsets(count, span)):
-            fingerprint = copy.deepcopy(device)
-            if index >= update_at:
-                fingerprint["canvasHash"] = updated_canvas
-            subnet = self._new_subnet()
-            self._add("residential_proxy_farm", group, offset, self._host(subnet),
-                      self._residential_asn("MX"), False, "MX", fingerprint, COUNTRIES["MX"][1])
+        """Por granja: un /24 distinto por cuenta y sin hosting, pero el mismo dispositivo, en pocas horas."""
+        farms, count = self.config.farms_per_archetype, self.config.proxy_farm
+        for farm in range(farms):
+            device = self._device("MX")
+            # A mitad de la campaña el navegador se actualiza: solo cambia el canvas.
+            updated_canvas = self._canvas_hash()
+            update_at = count // 2
+            group = self._group_id("proxy_farm")
+            span = self.rng.randint(2 * HOUR, 4 * HOUR)
+            begin = self._staggered_start(farm, farms, span)
+            for index, offset in enumerate(self._offsets(count, span, begin)):
+                fingerprint = copy.deepcopy(device)
+                if index >= update_at:
+                    fingerprint["canvasHash"] = updated_canvas
+                subnet = self._new_subnet()
+                self._add("residential_proxy_farm", group, offset, self._host(subnet),
+                          self._residential_asn("MX"), False, "MX", fingerprint, COUNTRIES["MX"][1])
 
     def device_reuse_farm(self) -> None:
-        """El mismo dispositivo y la misma IP, todas las cuentas en unos 10 minutos."""
-        count = self.config.device_farm
-        if count == 0:
-            return
-        ip = self._host(self._new_subnet())
-        asn = self._residential_asn("MX")
-        device = self._device("MX")
-        group = self._group_id("device_farm")
-        for offset in self._offsets(count, 10 * MINUTE):
-            self._add("device_reuse_farm", group, offset, ip, asn, False, "MX",
-                      copy.deepcopy(device), COUNTRIES["MX"][1])
+        """Por granja: el mismo dispositivo y la misma IP, todas las cuentas en unos 10 minutos."""
+        farms, count = self.config.farms_per_archetype, self.config.device_farm
+        for index in range(farms):
+            ip = self._host(self._new_subnet())
+            asn = self._residential_asn("MX")
+            device = self._device("MX")
+            group = self._group_id("device_farm")
+            begin = self._staggered_start(index, farms, 10 * MINUTE)
+            for offset in self._offsets(count, 10 * MINUTE, begin):
+                self._add("device_reuse_farm", group, offset, ip, asn, False, "MX",
+                          copy.deepcopy(device), COUNTRIES["MX"][1])
 
     # --- Arquetipos legítimos ---
 
@@ -306,10 +333,11 @@ class _Generator:
 
     def shared_households(self) -> None:
         """Grupos de 2-3 cuentas con el mismo dispositivo e IP, separadas por días o semanas."""
-        for _ in range(self.config.households):
+        total = self.config.households
+        for index in range(total):
             size = self.rng.choice([2, 3])
             gaps = [self.rng.randint(3 * DAY, 21 * DAY) for _ in range(size - 1)]
-            offset = self._offset_in_window(sum(gaps))
+            offset = self._staggered_start(index, total, sum(gaps))
             country = self._country()
             ip = self._host(self._new_subnet())
             asn = self._residential_asn(country)
@@ -321,34 +349,35 @@ class _Generator:
                           copy.deepcopy(device), COUNTRIES[country][1])
 
     def internet_cafe(self) -> None:
-        """Un dispositivo y una IP con muchas cuentas de personas distintas, repartidas en semanas."""
-        count = self.config.cafe_accounts
-        if count == 0:
-            return
-        span = self.rng.randint(14 * DAY, 42 * DAY)
-        begin = self._offset_in_window(span)
-        # La primera y la última quedan en los extremos: el tramo mide `span` seguro.
-        middle = [begin + self.rng.randint(0, span) for _ in range(max(0, count - 2))]
-        offsets = sorted([begin, begin + span][:count] + middle)
-        ip = self._host(self._new_subnet())
-        asn = self._residential_asn("MX")
-        device = self._device("MX")
-        group = self._group_id("cafe")
-        for offset in offsets:
-            self._add("internet_cafe", group, offset, ip, asn, False, "MX",
-                      copy.deepcopy(device), COUNTRIES["MX"][1])
+        """Por cibercafé: un dispositivo y una IP con cuentas de personas distintas, repartidas en semanas."""
+        cafes, count = self.config.cafes, self.config.cafe_accounts
+        for index in range(cafes):
+            span = self.rng.randint(14 * DAY, 42 * DAY)
+            begin = self._staggered_start(index, cafes, span)
+            # La primera y la última quedan en los extremos: el tramo mide `span` seguro.
+            middle = [begin + self.rng.randint(0, span) for _ in range(max(0, count - 2))]
+            offsets = sorted([begin, begin + span][:count] + middle)
+            ip = self._host(self._new_subnet())
+            asn = self._residential_asn("MX")
+            device = self._device("MX")
+            group = self._group_id("cafe")
+            for offset in offsets:
+                self._add("internet_cafe", group, offset, ip, asn, False, "MX",
+                          copy.deepcopy(device), COUNTRIES["MX"][1])
 
     def shared_ip_noise(self) -> None:
-        """Una IP compartida (escuela o CGNAT) con muchos usuarios, cada uno con su dispositivo."""
-        count = self.config.shared_ip_users
-        if count == 0:
-            return
-        ip = self._host(self._new_subnet())
-        asn = self._residential_asn("MX")
-        group = self._group_id("shared_ip")
-        for _ in range(count):
-            self._add("shared_ip_noise", group, self.rng.randint(0, self.window), ip, asn, False, "MX",
-                      self._device("MX"), COUNTRIES["MX"][1])
+        """Por IP compartida (escuela o CGNAT): muchos usuarios, cada uno con su dispositivo."""
+        shared_ips, count = self.config.shared_ips, self.config.shared_ip_users
+        for index in range(shared_ips):
+            # Cada IP está activa al menos media ventana, empezando en su propia franja.
+            span = self.rng.randint(self.window // 2, self.window)
+            begin = self._staggered_start(index, shared_ips, span)
+            ip = self._host(self._new_subnet())
+            asn = self._residential_asn("MX")
+            group = self._group_id("shared_ip")
+            for _ in range(count):
+                self._add("shared_ip_noise", group, begin + self.rng.randint(0, span), ip, asn, False, "MX",
+                          self._device("MX"), COUNTRIES["MX"][1])
 
     def run(self) -> list[dict]:
         self.datacenter_bots()
@@ -365,9 +394,20 @@ class _Generator:
         return self.accounts
 
 
+def groups_per_archetype(accounts: list[dict]) -> dict:
+    """Grupos distintos de cada arquetipo (los usuarios normales no tienen grupo)."""
+    return {
+        archetype: len({a["group_id"] for a in accounts if a["archetype"] == archetype and a["group_id"]})
+        for archetype in FRAUD_ARCHETYPES + LEGIT_ARCHETYPES
+    }
+
+
 def generate(config: Config, hosting_asns: list[int]) -> dict:
     """Documento completo: cabecera honesta + lista de cuentas."""
-    if config.datacenter_bots > 0 and not hosting_asns:
+    error = validate_config(config)
+    if error:
+        raise ValueError(error)
+    if config.farms_per_archetype > 0 and not hosting_asns:
         raise ValueError("Hace falta al menos un ASN de hosting para los bots de datacenter")
     accounts = _Generator(config, sorted(hosting_asns)).run()
     return {
@@ -377,6 +417,7 @@ def generate(config: Config, hosting_asns: list[int]) -> dict:
         "seed": config.seed,
         "generated_with": VERSION,
         "parameters": asdict(config),
+        "groups_per_archetype": groups_per_archetype(accounts),
         "notes": [
             "ip, asn y country son inventados; una IP puede coincidir por azar con una real, pero no la representa.",
             "Los ASN residenciales son del rango privado 64512-65534 (RFC 6996); "
@@ -395,10 +436,12 @@ def to_json(document: dict) -> str:
 
 def summary(document: dict) -> str:
     accounts = document["accounts"]
-    lines = [f"Cuentas sintéticas: {len(accounts)} (semilla {document['seed']})"]
+    parameters = ", ".join(f"{key}={value}" for key, value in document["parameters"].items())
+    lines = [f"Cuentas sintéticas: {len(accounts)} (semilla {document['seed']})",
+             f"  Parámetros: {parameters}"]
     for archetype in FRAUD_ARCHETYPES + LEGIT_ARCHETYPES:
         count = sum(1 for a in accounts if a["archetype"] == archetype)
-        groups = len({a["group_id"] for a in accounts if a["archetype"] == archetype and a["group_id"]})
+        groups = document["groups_per_archetype"][archetype]
         label = "fraud" if archetype in FRAUD_ARCHETYPES else "legit"
         lines.append(f"  {archetype:<24} {label:<6} {count:>5} cuentas  {groups:>3} grupos")
     for label in ("fraud", "legit"):
@@ -421,25 +464,39 @@ def parse_args(argv: list[str] | None = None) -> tuple[Config, Path]:
     parser.add_argument("--start", default=defaults.start, help="Fecha base en ISO 8601 (UTC)")
     parser.add_argument("--days", type=_non_negative, default=defaults.days, help="Ventana de tiempo en días")
     parser.add_argument("--normal", type=_non_negative, default=defaults.normal)
-    parser.add_argument("--datacenter-bots", type=_non_negative, default=defaults.datacenter_bots)
-    parser.add_argument("--proxy-farm", type=_non_negative, default=defaults.proxy_farm)
-    parser.add_argument("--device-farm", type=_non_negative, default=defaults.device_farm)
+    parser.add_argument("--farms-per-archetype", type=_non_negative, default=defaults.farms_per_archetype,
+                        help="Granjas independientes de cada arquetipo de fraude")
+    parser.add_argument("--datacenter-bots", type=_non_negative, default=defaults.datacenter_bots,
+                        help="Cuentas por granja de bots de datacenter")
+    parser.add_argument("--proxy-farm", type=_non_negative, default=defaults.proxy_farm,
+                        help="Cuentas por granja de proxies residenciales")
+    parser.add_argument("--device-farm", type=_non_negative, default=defaults.device_farm,
+                        help="Cuentas por granja de un solo dispositivo")
     parser.add_argument("--households", type=_non_negative, default=defaults.households,
                         help="Número de hogares (cada uno con 2 o 3 cuentas)")
-    parser.add_argument("--cafe-accounts", type=_non_negative, default=defaults.cafe_accounts)
-    parser.add_argument("--shared-ip-users", type=_non_negative, default=defaults.shared_ip_users)
+    parser.add_argument("--cafes", type=_non_negative, default=defaults.cafes,
+                        help="Número de cibercafés independientes")
+    parser.add_argument("--cafe-accounts", type=_non_negative, default=defaults.cafe_accounts,
+                        help="Cuentas por cibercafé")
+    parser.add_argument("--shared-ips", type=_non_negative, default=defaults.shared_ips,
+                        help="Número de IPs compartidas (escuela o CGNAT) independientes")
+    parser.add_argument("--shared-ip-users", type=_non_negative, default=defaults.shared_ip_users,
+                        help="Usuarios por IP compartida")
     args = parser.parse_args(argv)
-    if args.datacenter_bots > 254:
-        parser.error("--datacenter-bots no puede pasar de 254 (comparten un /24)")
     try:
         _parse_start(args.start)
     except ValueError:
         parser.error("--start debe ser una fecha ISO 8601, por ejemplo 2026-09-01T00:00:00Z")
     config = Config(
         seed=args.seed, start=args.start, days=args.days, normal=args.normal,
-        datacenter_bots=args.datacenter_bots, proxy_farm=args.proxy_farm, device_farm=args.device_farm,
-        households=args.households, cafe_accounts=args.cafe_accounts, shared_ip_users=args.shared_ip_users,
+        farms_per_archetype=args.farms_per_archetype, datacenter_bots=args.datacenter_bots,
+        proxy_farm=args.proxy_farm, device_farm=args.device_farm, households=args.households,
+        cafes=args.cafes, cafe_accounts=args.cafe_accounts,
+        shared_ips=args.shared_ips, shared_ip_users=args.shared_ip_users,
     )
+    error = validate_config(config)
+    if error:
+        parser.error(error)
     return config, args.out
 
 

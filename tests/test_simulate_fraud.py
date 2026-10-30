@@ -42,6 +42,13 @@ def _subnet(ip):
     return ip.rsplit(".", 1)[0]
 
 
+def _groups(document, archetype):
+    groups = defaultdict(list)
+    for account in _by_archetype(document, archetype):
+        groups[account["group_id"]].append(account)
+    return groups
+
+
 # --- Reproducibilidad ---
 
 def test_same_seed_gives_identical_bytes(tmp_path):
@@ -79,11 +86,12 @@ def test_header_declares_synthetic(document):
 def test_default_counts_per_archetype(document):
     counts = Counter(a["archetype"] for a in document["accounts"])
     assert counts["normal"] == 400
-    assert counts["datacenter_bot"] == 20
-    assert counts["residential_proxy_farm"] == 12
-    assert counts["device_reuse_farm"] == 6
-    assert counts["internet_cafe"] == 12
-    assert counts["shared_ip_noise"] == 45
+    # Tamaños por grupo x grupos: 5 granjas de cada fraude, 3 cibercafés y 3 IPs compartidas.
+    assert counts["datacenter_bot"] == 5 * 8
+    assert counts["residential_proxy_farm"] == 5 * 6
+    assert counts["device_reuse_farm"] == 5 * 6
+    assert counts["internet_cafe"] == 3 * 12
+    assert counts["shared_ip_noise"] == 3 * 45
     households = defaultdict(int)
     for account in _by_archetype(document, "shared_household"):
         households[account["group_id"]] += 1
@@ -96,8 +104,10 @@ def test_cli_parameters_change_counts():
                                            "--device-farm", "7", "--households", "1",
                                            "--cafe-accounts", "9", "--shared-ip-users", "31"])
     counts = Counter(a["archetype"] for a in simulate_fraud.generate(config, HOSTING_ASNS)["accounts"])
+    # Cada tamaño se multiplica por los grupos por defecto (5 granjas, 3 cibercafés, 3 IPs compartidas).
     assert (counts["normal"], counts["datacenter_bot"], counts["residential_proxy_farm"],
-            counts["device_reuse_farm"], counts["internet_cafe"], counts["shared_ip_noise"]) == (3, 4, 5, 7, 9, 31)
+            counts["device_reuse_farm"], counts["internet_cafe"], counts["shared_ip_noise"]) == (
+        3, 5 * 4, 5 * 5, 5 * 7, 3 * 9, 3 * 31)
 
 
 def test_summary_lists_archetypes_and_labels(document):
@@ -150,37 +160,38 @@ def test_start_date_is_controlled_not_now(document):
 # --- Arquetipos de fraude ---
 
 def test_datacenter_bots(document):
-    bots = _by_archetype(document, "datacenter_bot")
-    assert len({_subnet(a["ip"]) for a in bots}) == 1
-    assert len({a["ip"] for a in bots}) == len(bots)
-    assert all(a["is_hosting"] and a["asn"] in HOSTING_ASNS for a in bots)
-    assert all(a["behavior_flags"]["form_too_fast"] for a in bots)
-    # Huellas distintas, pero con muy pocos valores posibles.
-    assert len({a["fingerprint"]["canvasHash"] for a in bots}) == len(bots)
-    assert len({a["fingerprint"]["platform"] for a in bots}) == 1
-    times = sorted(_time(a) for a in bots)
-    assert times[-1] - times[0] <= timedelta(minutes=30)
+    for bots in _groups(document, "datacenter_bot").values():
+        assert len({_subnet(a["ip"]) for a in bots}) == 1
+        assert len({a["ip"] for a in bots}) == len(bots)
+        assert all(a["is_hosting"] and a["asn"] in HOSTING_ASNS for a in bots)
+        assert all(a["behavior_flags"]["form_too_fast"] for a in bots)
+        # Huellas distintas, pero con muy pocos valores posibles.
+        assert len({a["fingerprint"]["canvasHash"] for a in bots}) == len(bots)
+        assert len({a["fingerprint"]["platform"] for a in bots}) == 1
+        times = sorted(_time(a) for a in bots)
+        assert times[-1] - times[0] <= timedelta(minutes=30)
 
 
 def test_residential_proxy_farm(document):
-    farm = _by_archetype(document, "residential_proxy_farm")
-    assert len({_subnet(a["ip"]) for a in farm}) == len(farm)
-    assert not any(a["is_hosting"] for a in farm)
-    # El mismo dispositivo con variaciones pequeñas: todas en la misma familia que la primera.
-    first = flatten(farm[0]["fingerprint"], farm[0]["timezone"])
-    assert all(similarity(first, flatten(a["fingerprint"], a["timezone"])) >= FAMILY_THRESHOLD for a in farm)
-    assert len({a["fingerprint"]["canvasHash"] for a in farm}) == 2
-    times = sorted(_time(a) for a in farm)
-    assert times[-1] - times[0] <= timedelta(hours=4)
+    for farm in _groups(document, "residential_proxy_farm").values():
+        assert len({_subnet(a["ip"]) for a in farm}) == len(farm)
+        assert not any(a["is_hosting"] for a in farm)
+        # El mismo dispositivo con variaciones pequeñas: todas en la misma familia que la primera.
+        first = flatten(farm[0]["fingerprint"], farm[0]["timezone"])
+        assert all(similarity(first, flatten(a["fingerprint"], a["timezone"])) >= FAMILY_THRESHOLD
+                   for a in farm)
+        assert len({a["fingerprint"]["canvasHash"] for a in farm}) == 2
+        times = sorted(_time(a) for a in farm)
+        assert times[-1] - times[0] <= timedelta(hours=4)
 
 
 def test_device_reuse_farm_within_15_minutes(document):
-    farm = _by_archetype(document, "device_reuse_farm")
-    assert len(farm) == 6
-    assert len({a["ip"] for a in farm}) == 1
-    assert all(a["fingerprint"] == farm[0]["fingerprint"] for a in farm)
-    times = sorted(_time(a) for a in farm)
-    assert times[-1] - times[0] <= timedelta(minutes=15)
+    for farm in _groups(document, "device_reuse_farm").values():
+        assert len(farm) == 6
+        assert len({a["ip"] for a in farm}) == 1
+        assert all(a["fingerprint"] == farm[0]["fingerprint"] for a in farm)
+        times = sorted(_time(a) for a in farm)
+        assert times[-1] - times[0] <= timedelta(minutes=15)
 
 
 # --- Arquetipos legítimos ---
@@ -204,19 +215,19 @@ def test_households_share_device_and_ip_days_apart(document):
 
 
 def test_internet_cafe_is_spread_over_weeks(document):
-    cafe = _by_archetype(document, "internet_cafe")
-    assert 8 <= len(cafe) <= 15
-    assert len({a["ip"] for a in cafe}) == 1
-    assert all(a["fingerprint"] == cafe[0]["fingerprint"] for a in cafe)
-    times = sorted(_time(a) for a in cafe)
-    assert times[-1] - times[0] >= timedelta(weeks=1)
+    for cafe in _groups(document, "internet_cafe").values():
+        assert 8 <= len(cafe) <= 15
+        assert len({a["ip"] for a in cafe}) == 1
+        assert all(a["fingerprint"] == cafe[0]["fingerprint"] for a in cafe)
+        times = sorted(_time(a) for a in cafe)
+        assert times[-1] - times[0] >= timedelta(weeks=1)
 
 
 def test_shared_ip_noise_has_distinct_devices(document):
-    users = _by_archetype(document, "shared_ip_noise")
-    assert 30 <= len(users) <= 60
-    assert len({a["ip"] for a in users}) == 1
-    assert len({a["fingerprint"]["canvasHash"] for a in users}) == len(users)
+    for users in _groups(document, "shared_ip_noise").values():
+        assert 30 <= len(users) <= 60
+        assert len({a["ip"] for a in users}) == 1
+        assert len({a["fingerprint"]["canvasHash"] for a in users}) == len(users)
 
 
 # --- Huella igual a la del collector ---
@@ -236,3 +247,79 @@ def test_fingerprint_fields_match_collector(document):
         assert set(account["fingerprint"]["screen"]) == screen_keys
         # Y el servidor las aceptaría tal cual.
         Fingerprint.model_validate(account["fingerprint"])
+
+
+# --- Varios grupos por arquetipo ---
+
+def test_groups_per_archetype_with_defaults(document):
+    expected = {"datacenter_bot": 5, "residential_proxy_farm": 5, "device_reuse_farm": 5, "normal": 0,
+                "shared_household": 20, "internet_cafe": 3, "shared_ip_noise": 3}
+    assert document["groups_per_archetype"] == expected
+    for archetype, total in expected.items():
+        if total:
+            assert len(_groups(document, archetype)) == total
+
+
+def test_header_parameters_include_group_options(document):
+    parameters = document["parameters"]
+    assert (parameters["farms_per_archetype"], parameters["cafes"], parameters["shared_ips"]) == (5, 3, 3)
+    assert (parameters["datacenter_bots"], parameters["proxy_farm"], parameters["device_farm"]) == (8, 6, 6)
+
+
+def test_groups_are_independent(document):
+    # Dueño de cada cuenta: su grupo, o la propia cuenta si no tiene grupo (usuarios normales).
+    archetype_of_group = {}
+    owners = {"ip": defaultdict(set), "subnet": defaultdict(set), "canvas": defaultdict(set),
+              "device": defaultdict(set)}
+    for account in document["accounts"]:
+        if account["group_id"]:
+            assert archetype_of_group.setdefault(account["group_id"], account["archetype"]) == account["archetype"]
+        owner = account["group_id"] or account["account_id"]
+        owners["ip"][account["ip"]].add(owner)
+        owners["subnet"][_subnet(account["ip"])].add(owner)
+        owners["canvas"][account["fingerprint"]["canvasHash"]].add(owner)
+        owners["device"][str(account["fingerprint"])].add(owner)
+    for kind, mapping in owners.items():
+        shared = {key: found for key, found in mapping.items() if len(found) > 1}
+        assert shared == {}, f"{kind} compartido entre grupos: {shared}"
+
+
+def test_every_fraud_farm_has_at_least_four_accounts(document):
+    for archetype in simulate_fraud.FRAUD_ARCHETYPES:
+        assert all(len(farm) >= 4 for farm in _groups(document, archetype).values())
+
+
+@pytest.mark.parametrize("flag", ["--datacenter-bots", "--proxy-farm", "--device-farm"])
+def test_farm_smaller_than_four_fails_clearly(flag, capsys):
+    with pytest.raises(SystemExit):
+        simulate_fraud.parse_args([flag, "3"])
+    error = capsys.readouterr().err
+    assert "al menos 4 cuentas" in error
+    assert f"{flag}=3" in error
+
+
+def test_generate_also_rejects_small_farms():
+    with pytest.raises(ValueError, match="al menos 4 cuentas"):
+        simulate_fraud.generate(simulate_fraud.Config(device_farm=2), HOSTING_ASNS)
+
+
+def test_new_parameters_change_counts():
+    config, _ = simulate_fraud.parse_args(["--normal", "10", "--farms-per-archetype", "2",
+                                           "--cafes", "1", "--shared-ips", "4"])
+    document = simulate_fraud.generate(config, HOSTING_ASNS)
+    counts = Counter(a["archetype"] for a in document["accounts"])
+    assert (counts["datacenter_bot"], counts["residential_proxy_farm"], counts["device_reuse_farm"],
+            counts["internet_cafe"], counts["shared_ip_noise"]) == (2 * 8, 2 * 6, 2 * 6, 1 * 12, 4 * 45)
+    groups = document["groups_per_archetype"]
+    assert (groups["datacenter_bot"], groups["internet_cafe"], groups["shared_ip_noise"]) == (2, 1, 4)
+
+
+def test_groups_of_same_archetype_start_at_different_times(document):
+    for archetype, total in document["groups_per_archetype"].items():
+        if total < 2:
+            continue
+        starts = sorted(min(_time(a) for a in members) for members in _groups(document, archetype).values())
+        assert len(set(starts)) == len(starts), archetype
+        if archetype in simulate_fraud.FRAUD_ARCHETYPES:
+            # 5 granjas repartidas en 60 días: la primera y la última empiezan con un mes o más de diferencia.
+            assert starts[-1] - starts[0] >= timedelta(days=30), archetype
