@@ -192,3 +192,29 @@ Qué pierdo con esto:
 - La IP se guarda en claro y el log de acceso de uvicorn también la imprime. En producción iría truncada a /24 y con retención limitada (va en ETHICS.md).
 - La clave HMAC y la contraseña de Postgres tienen valores de desarrollo por defecto. Nunca en producción.
 Cómo lo comprobé: tests con un escritor falso (la CI no tiene Postgres), y a mano contra un Postgres real: filas correctas, sin correo en claro, 200 con Postgres detenido y aviso sin datos personales.
+
+## D29: Huellas de dispositivo y señal de reutilización
+Qué problema había: quiero saber si varias cuentas se crearon desde el mismo equipo, aunque entre una y otra se actualice el navegador. Comparar la huella exacta no sirve: una actualización cambia el dibujo del canvas y la huella ya no es idéntica.
+Qué elegí:
+- Un script en la página que recoge datos del equipo: el dibujo del canvas, la tarjeta gráfica (WebGL), los núcleos, la pantalla, los idiomas, el sistema operativo y si la pantalla es táctil. La zona horaria se manda aparte.
+- Dos huellas se comparan dato por dato, y cada dato vale un porcentaje: canvas 20 %, tarjeta gráfica 20 %, pantalla 15 %, núcleos 10 %, sistema operativo 10 %, idiomas 10 % (según cuántos tienen en común), zona horaria 10 % y táctil 5 %. Si a una de las dos huellas le falta un dato, ese dato no cuenta ni a favor ni en contra, y los demás se reparten el 100 %.
+- Si se parecen un 75 % o más, son "el mismo dispositivo". Con el navegador actualizado (solo cambia el canvas) salen 80 % y siguen siendo el mismo. Dos equipos distintos salen 25 %.
+- Para que sea rápido con muchos usuarios no comparo contra todos: solo contra las 200 huellas más recientes con el mismo sistema operativo, núcleos y pantalla, que encuentro con un índice.
+- La señal cuenta cuántas OTRAS cuentas (con otro correo) usan el mismo dispositivo. Si son 1 o 2, suma 15 puntos; si son 3 o más, suma 35.
+- Solo guardo la huella cuando el registro se permite, se pide verificación o va a revisión. Nunca en bloqueos ni en rechazos.
+- Si la búsqueda tarda más de 150 ms o falla, la señal queda "no verificada" y el registro sigue (PR-5).
+Por qué esos pesos: el canvas y la tarjeta gráfica son los que mejor distinguen un equipo de otro, pero el canvas cambia con las actualizaciones. Por eso cada uno vale 20 %, menos que la pantalla y los núcleos juntos (25 %). Los pesos son una hipótesis que pruebo en la Fase 6.
+Qué descarté y por qué:
+- Exigir que la huella sea idéntica: deja de coincidir con cada actualización del navegador (el PDF también pide documentarlo).
+- Comparar contra todos los usuarios: con 500 mil cuentas sería demasiado lento.
+- Dar 0 cuando falta un dato del índice: un bot que no manda su huella parecería limpio.
+Qué pierdo con esto:
+- Solo comparo contra las 200 huellas más recientes que tengan la misma plataforma, el mismo número de núcleos y la misma pantalla. En una configuración muy común (por ejemplo Windows, 8 núcleos y 1920x1080) esas 200 se agotan rápido, y una cuenta antigua de una granja puede quedar fuera de la comparación.
+- Un atacante que cambie uno de esos cuatro valores en cada cuenta evita la comparación, porque el índice solo encuentra candidatos que coinciden exactamente en ellos.
+- Si cambian a la vez el canvas y el renderizador de WebGL, la similitud baja a 0.60 y deja de contar como el mismo dispositivo.
+- Dos equipos idénticos (mismo modelo, mismo navegador) pueden salir como "el mismo dispositivo". La huella es una señal suave, no una identificación.
+- Una huella con un campo del índice vacío no se compara (queda "no verificada"), así que un bot que no manda su huella no recibe penalización por reutilización.
+- La lectura de candidatos ocurre dentro de la petición. Con Postgres caído cada registro con huella espera hasta 150 ms más.
+- No hay caducidad: una huella guardada hoy sigue contando mientras exista en la tabla.
+Cómo lo comprobé: tests con un almacén falso (el mismo dispositivo con el navegador actualizado, dos dispositivos distintos y una granja de 6 cuentas), a mano contra un Postgres real, y desde mi navegador: el cuarto registro del mismo dispositivo dio verification_required.
+Para ETHICS.md: ahora guardo datos que identifican un dispositivo. En producción haría falta decidir cuánto tiempo se guardan y guardar solo lo necesario.
