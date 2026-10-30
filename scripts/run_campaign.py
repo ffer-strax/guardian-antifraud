@@ -23,6 +23,7 @@ la librería estándar y se corre fuera de Docker (por ejemplo, desde Windows):
 import argparse
 import json
 import os
+import statistics
 import sys
 from collections import Counter
 from pathlib import Path
@@ -49,10 +50,36 @@ MIN_SAFE_PACE_SECONDS = 1.6
 ACTIONS = ("allow", "step_up", "review", "block")
 TABLES_TO_RESET = ("audit_log", "device_fingerprints")
 DEBUG_HINT = "levanta la API con DEBUG_CLIENT_IP_HEADER=true"
+DEVICE_REUSE_SIGNALS = ("device_reuse_low", "device_reuse_high")
 
 
 class CampaignError(RuntimeError):
     pass
+
+
+def _risk_engine():
+    """El motor real de backend/ (montado en solo lectura en el contenedor de bots). Se importa
+    recién aquí: el modo --update-readme-from no lo necesita y debe correr solo con la librería estándar."""
+    sys.path.insert(0, str(ROOT / "backend"))
+    from services import risk_engine
+    return risk_engine
+
+
+def rescore(reasons: list[str], excluded: tuple[str, ...] = ()) -> tuple[int, str]:
+    """Puntaje y acción que daría el motor con estas razones, sin las de `excluded`. Usa los pesos y
+    umbrales reales del motor, con el mismo tope 0-100."""
+    engine = _risk_engine()
+    score = sum(engine.WEIGHTS[reason] for reason in reasons if reason not in excluded)
+    score = max(0, min(engine.MAX_SCORE, score))
+    action = engine.THRESHOLDS[0][1]
+    for minimum, name in engine.THRESHOLDS:
+        if score >= minimum:
+            action = name
+    return score, action
+
+
+def without_device_reuse(result: dict) -> tuple[int, str]:
+    return rescore(result["reasons"] or [], DEVICE_REUSE_SIGNALS)
 
 
 def pace_warning(pace: float) -> str | None:
@@ -63,8 +90,13 @@ def pace_warning(pace: float) -> str | None:
 
 
 def check_result(result: dict) -> None:
-    """Corta la campaña en cuanto una respuesta no trae debug_risk."""
+    """Corta la campaña en cuanto una respuesta no trae debug_risk, o si los pesos montados de
+    backend/ no reproducen el puntaje de la API (las métricas sin device_reuse saldrían mal)."""
     if result["has_debug_risk"]:
+        expected = (result["score"], result["action"])
+        if rescore(result["reasons"]) != expected:
+            raise CampaignError(f"Los pesos de backend/ dan {rescore(result['reasons'])} y la API dio {expected} "
+                                f"para {result['reasons']}: reconstruye la imagen de la API (docker compose build api).")
         return
     if result["status"] is not None:
         # Es una decisión del motor, pero sin explicación: la API no está en modo debug.
@@ -84,6 +116,12 @@ def is_lax_evasion(action: str | None) -> bool:
     return action in ("allow", "step_up")
 
 
+def annotate(result: dict) -> dict:
+    """Agrega al resultado el puntaje y la acción que habría sin device_reuse_low/high."""
+    score, action = without_device_reuse(result)
+    return {**result, "score_without_reuse": score, "action_without_reuse": action}
+
+
 def summarize(results: list[dict]) -> list[dict]:
     """Una fila por nivel, en el orden en que se corrieron."""
     tiers = list(dict.fromkeys(r["tier"] for r in results))
@@ -92,6 +130,9 @@ def summarize(results: list[dict]) -> list[dict]:
         rows_of_tier = [r for r in results if r["tier"] == tier]
         actions = Counter(r["action"] for r in rows_of_tier)
         reasons = Counter(reason for r in rows_of_tier for reason in (r["reasons"] or []))
+        scores = [r["score"] for r in rows_of_tier]
+        rescored = [without_device_reuse(r) for r in rows_of_tier]
+        scores_without = [score for score, _ in rescored]
         rows.append({
             "tier": tier,
             "registrations": len(rows_of_tier),
@@ -100,6 +141,11 @@ def summarize(results: list[dict]) -> list[dict]:
             "lax_evasion": sum(is_lax_evasion(r["action"]) for r in rows_of_tier),
             # Empates por nombre, para que la tabla sea estable.
             "top_reasons": sorted(reasons.items(), key=lambda item: (-item[1], item[0]))[:3],
+            "score_median": statistics.median(scores),
+            "score_min": min(scores),
+            "score_median_without_reuse": statistics.median(scores_without),
+            "score_min_without_reuse": min(scores_without),
+            "actions_changed_without_reuse": sum(r["action"] != action for r, (_, action) in zip(rows_of_tier, rescored)),
         })
     return rows
 
@@ -108,11 +154,17 @@ def _share(count: int, total: int) -> str:
     return f"{count}/{total} ({count / total:.0%})" if total else "0/0"
 
 
+def _number(value: float) -> str:
+    # La mediana de una cantidad par de puntajes puede terminar en .5.
+    return str(int(value)) if float(value).is_integer() else f"{value:.1f}"
+
+
 def render_table(summary: list[dict]) -> str:
     lines = [
         "| Nivel | Registros | allow | step_up | review | block | Evasión estricta | Evasión laxa "
-        "| Señales más frecuentes (top 3) |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| Señales más frecuentes (top 3) | Score mediano | Score mínimo | Mediano sin device_reuse "
+        "| Mínimo sin device_reuse | Cambian de acción sin device_reuse |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in summary:
         name = evasion_bot.TIER_NAMES.get(row["tier"])
@@ -121,7 +173,10 @@ def render_table(summary: list[dict]) -> str:
         total = row["registrations"]
         lines.append(
             f"| {tier} | {total} | " + " | ".join(str(row["actions"][a]) for a in ACTIONS)
-            + f" | {_share(row['strict_evasion'], total)} | {_share(row['lax_evasion'], total)} | {reasons} |"
+            + f" | {_share(row['strict_evasion'], total)} | {_share(row['lax_evasion'], total)} | {reasons}"
+            + f" | {_number(row['score_median'])} | {row['score_min']}"
+            + f" | {_number(row['score_median_without_reuse'])} | {row['score_min_without_reuse']}"
+            + f" | {row['actions_changed_without_reuse']}/{total} |"
         )
     return "\n".join(lines)
 
@@ -234,7 +289,7 @@ def main(argv: list[str] | None = None) -> None:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({
         "seed": args.seed, "tiers": tiers, "per_tier": args.per_tier, "pace_seconds": args.pace_seconds,
-        "summary": summary, "results": results,
+        "summary": summary, "results": [annotate(result) for result in results],
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     args.table_out.parent.mkdir(parents=True, exist_ok=True)
     args.table_out.write_text(table + "\n", encoding="utf-8")

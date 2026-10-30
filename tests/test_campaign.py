@@ -20,7 +20,8 @@ def _result(action, reasons=(), tier="1", index=0, debug=True, status=None, http
     body = {"status": status or {"allow": "ok", "step_up": "verification_required",
                                  "review": "pending_review", "block": "blocked"}.get(action)}
     if debug:
-        body["debug_risk"] = {"score": 0, "action": action, "reasons": list(reasons), "unverified": []}
+        score, _ = run_campaign.rescore(list(reasons))
+        body["debug_risk"] = {"score": score, "action": action, "reasons": list(reasons), "unverified": []}
     return evasion_bot.to_result(tier, index, http_status, body, 0.5)
 
 
@@ -57,10 +58,9 @@ def test_browser_is_full_chromium_with_secure_origin_flag():
     assert f"--unsafely-treat-insecure-origin-as-secure={evasion_bot.API_URL}" in options["args"]
 
 
-def test_unimplemented_tiers_fail_clearly():
-    for tier in ("2", "3", "3b"):
-        with pytest.raises(NotImplementedError, match=f"nivel {tier}"):
-            evasion_bot.ensure_implemented(tier)
+def test_unknown_tier_fails_clearly():
+    for tier in evasion_bot.KNOWN_TIERS:
+        evasion_bot.ensure_implemented(tier)
     with pytest.raises(ValueError, match="desconocido"):
         evasion_bot.ensure_implemented("9")
 
@@ -105,9 +105,10 @@ def test_render_table():
     table = run_campaign.render_table(run_campaign.summarize(SAMPLE))
     lines = table.splitlines()
     assert lines[0] == ("| Nivel | Registros | allow | step_up | review | block | Evasión estricta | Evasión laxa "
-                        "| Señales más frecuentes (top 3) |")
+                        "| Señales más frecuentes (top 3) | Score mediano | Score mínimo | Mediano sin device_reuse "
+                        "| Mínimo sin device_reuse | Cambian de acción sin device_reuse |")
     assert lines[2] == ("| 1 (bot ingenuo) | 6 | 1 | 2 | 1 | 2 | 1/6 (17%) | 3/6 (50%) "
-                        "| hosting_ip (5), form_too_fast (4), device_reuse_high (2) |")
+                        "| hosting_ip (5), form_too_fast (4), device_reuse_high (2) | 57.5 | 5 | 55 | 5 | 3/6 |")
 
 
 # --- README ---
@@ -141,7 +142,7 @@ def test_error_response_is_rejected_with_its_code():
 
 
 def test_result_with_debug_risk_passes():
-    run_campaign.check_result(_result("block"))
+    run_campaign.check_result(_result("block", ["hosting_ip", "device_reuse_high", "form_too_fast"]))
 
 
 @pytest.mark.parametrize("pace, warns", [(1.0, True), (1.59, True), (1.6, False), (2.0, False)])
@@ -163,7 +164,7 @@ def fake_campaign(monkeypatch, tmp_path):
 
     def fake_run_tier(tier, n, pace, seed, on_result=None):
         events.append(f"run {tier}")
-        results = [_result("step_up", ["hosting_ip"], tier=tier, index=i) for i in range(n)]
+        results = [_result("step_up", ["hosting_ip", "form_too_fast"], tier=tier, index=i) for i in range(n)]
         for result in results:
             on_result(result)
         return results
@@ -183,8 +184,8 @@ def test_tables_are_reset_before_each_tier(fake_campaign, tmp_path, capsys):
 
 
 def test_unimplemented_tier_aborts_before_touching_the_database(fake_campaign, tmp_path):
-    with pytest.raises(SystemExit, match="nivel 2"):
-        run_campaign.main(["--tiers", "1,2", "--out", str(tmp_path / "x.json")])
+    with pytest.raises(SystemExit, match="desconocido"):
+        run_campaign.main(["--tiers", "1,9", "--out", str(tmp_path / "x.json")])
     assert fake_campaign == []
 
 

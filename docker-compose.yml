@@ -55,6 +55,8 @@ services:
       - ./scripts:/work/scripts:ro
       # Lectura-escritura: los resultados de la campaña sobreviven al --rm.
       - ./data:/work/data
+      # Solo lectura: bases de IP (niveles 3 y 3b) y pesos del motor para las métricas sin device_reuse.
+      - ./backend:/work/backend:ro
     working_dir: /work
     environment:
       API_URL: http://api:8000
