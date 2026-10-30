@@ -119,3 +119,9 @@ copia estatica en el repositorio.
 - Limitaciones: un dominio solo con IPv6 (AAAA) daría no_mail; un atacante que provoque timeouts se salta el chequeo (fail-open); endpoint síncrono, una consulta lenta ocupa un hilo; la caché crece con cada dominio distinto (acotada por el rate limit).
 - Pendiente: marcar "no verificado" en el log de auditoría y sumar riesgo en el score.
 
+## D20: lookup propio con prefijo más largo, y pyasn solo para generar el archivo. Razón: la imagen slim no trae compilador y en PyPI solo hay código fuente. Fuente: RIB de Routeviews del 29-oct-2026, 1 159 994 prefijos IPv4, .gz de 4 MB.
+
+## D21: socket.inet_pton en vez de ipaddress para leer el archivo, tras medir 37 s frente a 3.9 s. Mi prompt decía “usa ipaddress”, y cambiaste la regla con datos.
+- Números medidos por ti: carga 2.92 s, 123.2 MiB retenidos, pico de 139.1 MiB, 24.6 µs por consulta.
+
+# Limitaciones: la carga perezosa hace que la primera petición espere ~3 s (hay que cargar al arrancar); la base vacía por fallo no se reintenta; solo IPv4; cada proceso cargaría su propia copia en memoria.
