@@ -1,6 +1,10 @@
-# EJEMPLOS, NO DATOS REALES: reemplazar con ASN de hosting verificados.
-# Se usan ASN del rango privado 64512-65534 (RFC 6996), que no pertenecen a nadie.
+# Fuente: bgp.tools, consultado el 29-oct-2026
 # Formato: ASN  nombre
-64512  ejemplo-hosting-uno
-64513  ejemplo-hosting-dos
-64514  ejemplo-hosting-tres
+16509    Amazon.com, Inc. (AWS)
+14618    Amazon.com, Inc. (AWS)
+24940    Hetzner Online GmbH
+215859   Hetzner Cloud - Singapore
+212317   Hetzner Cloud - Hillsboro
+213230   Hetzner Cloud - Ashburn
+8075     Microsoft Corporation
+14061    DigitalOcean LLC
