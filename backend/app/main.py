@@ -2,14 +2,16 @@ import ipaddress
 import logging
 import os
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 
 import redis
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from pydantic import BaseModel, EmailStr, Field
 
-from services import asn_lookup, geo_lookup
+from services import asn_lookup, geo_lookup, risk_engine
 from services.email_utils import canonicalize_email, is_disposable
 from services.mx_checker import NO_MAIL, check_mx
 from services.rate_limiter import check_rate_limit
@@ -110,6 +112,15 @@ def _compute_signals(ip: str, timezone: str | None) -> dict:
     }
 
 
+# Qué responde /register para cada acción del motor de riesgo: (código HTTP, status).
+_ACTION_RESPONSES = {
+    risk_engine.ALLOW: (200, "ok"),
+    risk_engine.STEP_UP: (200, "verification_required"),
+    risk_engine.REVIEW: (202, "pending_review"),
+    risk_engine.BLOCK: (403, "blocked"),
+}
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     # Zona horaria del navegador (ej. "Europe/Madrid"); opcional. Más de 64 caracteres -> 422.
@@ -122,7 +133,7 @@ def health() -> dict:
 
 
 @app.post("/register")
-def register(payload: RegisterRequest, request: Request) -> dict:
+def register(payload: RegisterRequest, request: Request) -> JSONResponse:
     # La IP sale de la conexión TCP, nunca de cabeceras que manda el cliente.
     ip = request.client.host if request.client else "unknown"
     _enforce_limit(
@@ -147,11 +158,14 @@ def register(payload: RegisterRequest, request: Request) -> dict:
     if check_mx(redis_client, domain, dns_timeout_seconds) == NO_MAIL:
         raise HTTPException(status_code=400, detail="domain_cannot_receive_mail")
 
-    # Señales solo informativas: no bloquean ni cambian la respuesta normal.
     # El rate limit de arriba siempre usa la IP real; el header de debug solo afecta aquí.
     signals = _compute_signals(_signals_ip(ip, request), payload.timezone)
-    response = {"status": "ok"}
+    risk = risk_engine.evaluate({**signals, "timezone": payload.timezone})
+
+    status_code, status = _ACTION_RESPONSES[risk.action]
+    response = {"status": status}
     if _debug_ip_header_enabled():
         # Fuera del modo debug no se devuelven, para no revelar qué reglas existen.
         response["debug_signals"] = signals
-    return response
+        response["debug_risk"] = asdict(risk)
+    return JSONResponse(status_code=status_code, content=response)

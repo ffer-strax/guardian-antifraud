@@ -1,10 +1,11 @@
+import logging
 from ipaddress import IPv4Address
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import main
-from services import asn_lookup, geo_lookup
+from services import asn_lookup, geo_lookup, risk_engine
 from services.asn_lookup import AsnDatabase
 from services.geo_lookup import GeoDatabase
 
@@ -103,6 +104,57 @@ def test_debug_header_never_changes_rate_limit_ip(debug_mode, monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_IP_MAX", "1")
     assert _register(ES_IP, email="a@example.com").status_code == 200
     assert _register(HOSTING_IP, email="b@example.com").status_code == 429
+
+
+def test_hosting_ip_with_mismatched_timezone_requires_verification(debug_mode, monkeypatch):
+    # HOSTING_IP es de US en la base pequeña; se agrega US al mapa para que Europe/Madrid no coincida.
+    monkeypatch.setattr(geo_lookup, "_country_timezones", {"US": frozenset({"America/New_York"})})
+    response = _register(HOSTING_IP, "Europe/Madrid")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "verification_required"
+    assert body["debug_risk"] == {
+        "score": 35,
+        "action": "step_up",
+        "reasons": ["hosting_ip", "tz_country_mismatch"],
+        "unverified": [],
+    }
+
+
+def test_normal_ip_is_allowed(debug_mode):
+    response = _register(ES_IP, "Europe/Madrid")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["debug_risk"]["score"] == 0
+    assert body["debug_risk"]["action"] == "allow"
+
+
+def test_risk_hidden_without_debug_mode(small_dbs, monkeypatch):
+    monkeypatch.delenv("DEBUG_CLIENT_IP_HEADER", raising=False)
+    monkeypatch.setattr(geo_lookup, "_country_timezones", {"US": frozenset({"America/New_York"})})
+    # Sin modo debug el header se ignora, así que tampoco hay IP de hosting: solo "ok".
+    assert _register(HOSTING_IP, "Europe/Madrid").json() == {"status": "ok"}
+
+
+def test_risk_engine_failure_allows_and_logs_no_personal_data(small_dbs, monkeypatch, caplog):
+    # Una regla que revienta con el correo y la IP en el mensaje: si el log copiara el
+    # mensaje de la excepción, esos datos aparecerían en caplog.
+    def broken_rule(signals):
+        raise RuntimeError("fallo con maria.perez@example.com desde testclient")
+
+    monkeypatch.setitem(risk_engine._RULES, "hosting_ip", broken_rule)
+    monkeypatch.delenv("DEBUG_CLIENT_IP_HEADER", raising=False)
+
+    with caplog.at_level(logging.WARNING):
+        response = _register(email="maria.perez@example.com")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert "Fallo al evaluar el riesgo, se permite: RuntimeError" in caplog.text
+    # TestClient se conecta con la IP "testclient": es lo que recibe request.client.host.
+    assert "testclient" not in caplog.text
+    assert "maria.perez" not in caplog.text
 
 
 def test_timezone_longer_than_64_returns_422(small_dbs):
