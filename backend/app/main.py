@@ -1,19 +1,50 @@
+import ipaddress
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import redis
 
 from fastapi import FastAPI, HTTPException, Request
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
+from services import asn_lookup, geo_lookup
 from services.email_utils import canonicalize_email, is_disposable
 from services.mx_checker import NO_MAIL, check_mx
 from services.rate_limiter import check_rate_limit
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="guardian-antifraud")
+DEBUG_IP_HEADER = "X-Debug-Client-IP"
+
+# Bases de las señales: las llena el lifespan al arrancar. None = no cargada, señal desconocida.
+asn_db: asn_lookup.AsnDatabase | None = None
+geo_db: geo_lookup.GeoDatabase | None = None
+
+
+def _debug_ip_header_enabled() -> bool:
+    return os.getenv("DEBUG_CLIENT_IP_HEADER", "").strip().lower() == "true"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Se carga todo al arrancar para que la primera petición no espere los ~4 s de carga.
+    # Los loaders nunca lanzan: si un archivo falla, dejan una base vacía y un warning.
+    global asn_db, geo_db
+    asn_db = asn_lookup.get_default_db()
+    geo_db = geo_lookup.get_default_geo_db()
+    geo_lookup.get_country_timezones()
+    if _debug_ip_header_enabled():
+        logger.warning(
+            "DEBUG_CLIENT_IP_HEADER=true: el header %s reemplaza la IP de las señales. "
+            "Solo para pruebas; nunca activarlo en producción.",
+            DEBUG_IP_HEADER,
+        )
+    yield
+
+
+app = FastAPI(title="guardian-antifraud", lifespan=lifespan)
 
 
 def _env_int(name: str, default: int) -> int:
@@ -52,8 +83,37 @@ def _enforce_limit(key: str, limit: int, window_seconds: int) -> None:
         )
 
 
+def _signals_ip(client_ip: str, request: Request) -> str:
+    """IP para las señales: la real, o la del header de debug si el modo está activo y es válida."""
+    if not _debug_ip_header_enabled():
+        return client_ip
+    header_value = request.headers.get(DEBUG_IP_HEADER)
+    if header_value is None:
+        return client_ip
+    try:
+        return str(ipaddress.ip_address(header_value.strip()))
+    except ValueError:
+        return client_ip
+
+
+def _compute_signals(ip: str, timezone: str | None) -> dict:
+    """Señales informativas de la IP; cada una es None cuando no se sabe."""
+    asn = asn_db.lookup(ip) if asn_db is not None else None
+    # Sin ASN no se puede saber si es hosting: None, no False.
+    is_hosting = asn_lookup.is_hosting_asn(asn) if asn is not None else None
+    country = geo_db.lookup(ip) if geo_db is not None else None
+    return {
+        "asn": asn,
+        "is_hosting": is_hosting,
+        "country": country,
+        "timezone_matches_country": geo_lookup.timezone_matches_country(country, timezone),
+    }
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
+    # Zona horaria del navegador (ej. "Europe/Madrid"); opcional. Más de 64 caracteres -> 422.
+    timezone: str | None = Field(default=None, max_length=64)
 
 
 @app.get("/health")
@@ -86,4 +146,12 @@ def register(payload: RegisterRequest, request: Request) -> dict:
     dns_timeout_seconds = _env_int("MX_DNS_TIMEOUT_MS", 1000) / 1000
     if check_mx(redis_client, domain, dns_timeout_seconds) == NO_MAIL:
         raise HTTPException(status_code=400, detail="domain_cannot_receive_mail")
-    return {"status": "ok"}
+
+    # Señales solo informativas: no bloquean ni cambian la respuesta normal.
+    # El rate limit de arriba siempre usa la IP real; el header de debug solo afecta aquí.
+    signals = _compute_signals(_signals_ip(ip, request), payload.timezone)
+    response = {"status": "ok"}
+    if _debug_ip_header_enabled():
+        # Fuera del modo debug no se devuelven, para no revelar qué reglas existen.
+        response["debug_signals"] = signals
+    return response

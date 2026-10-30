@@ -146,9 +146,18 @@ def get_default_geo_db() -> GeoDatabase:
     return _default_geo_db
 
 
+def get_country_timezones() -> dict[str, frozenset[str]]:
+    """Carga country_timezones.txt la primera vez y reutiliza el resultado."""
+    global _country_timezones
+    if _country_timezones is None:
+        with _lock:
+            if _country_timezones is None:
+                _country_timezones = load_country_timezones(_COUNTRY_TIMEZONES_PATH)
+    return _country_timezones
+
+
 def timezone_matches_country(country: str | None, timezone: str | None) -> bool | None:
     """True/False si la zona es o no del país; None si no hay información para decidir."""
-    global _country_timezones
     if not isinstance(country, str) or not isinstance(timezone, str):
         return None
     country = country.strip().upper()
@@ -158,12 +167,7 @@ def timezone_matches_country(country: str | None, timezone: str | None) -> bool 
     if timezone in NO_COUNTRY_TIMEZONES:
         return None
 
-    if _country_timezones is None:
-        with _lock:
-            if _country_timezones is None:
-                _country_timezones = load_country_timezones(_COUNTRY_TIMEZONES_PATH)
-
-    zones = _country_timezones.get(country)
+    zones = get_country_timezones().get(country)
     if zones is None:
         # País fuera del mapa (o mapa vacío): no sabemos, no se penaliza.
         return None
