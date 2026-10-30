@@ -24,6 +24,14 @@ services:
     depends_on:
       - postgres
       - redis
+    # Sano cuando /health responde. Solo librería estándar: la imagen slim no trae curl.
+    # start_period: la API tarda ~5 s en cargar sus bases; los fallos de ese arranque no cuentan.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
 
   # Los valores por defecto de postgres son SOLO para desarrollo y datos sintéticos.
   # En producción las credenciales vendrían de un gestor de secretos.
@@ -36,3 +44,17 @@ services:
 
   redis:
     image: redis:7.4.1
+
+  # Bots de prueba con Playwright (Fase 6). Por el profile NO se construye ni se levanta con un
+  # "docker compose up" normal; solo con: docker compose --profile bots run --rm bots ...
+  bots:
+    build: ./bots
+    profiles: ["bots"]
+    # Los scripts se montan de solo lectura; el bot llega a la API por la red de compose (http://api:8000).
+    volumes:
+      - ./scripts:/work/scripts:ro
+    working_dir: /work
+    # Espera a que la API responda, no solo a que su contenedor arranque.
+    depends_on:
+      api:
+        condition: service_healthy
