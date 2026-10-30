@@ -6,3 +6,6 @@ __pycache__/
 !.env.example
 # Salida del generador sintético (se regenera igual con scripts/simulate_fraud.py)
 data/synthetic_accounts.json
+# Resultados crudos de la campaña de evasión (scripts/run_campaign.py)
+data/campaign_results.json
+data/campaign_table.md

@@ -53,7 +53,16 @@ services:
     # Los scripts se montan de solo lectura; el bot llega a la API por la red de compose (http://api:8000).
     volumes:
       - ./scripts:/work/scripts:ro
+      # Lectura-escritura: los resultados de la campaña sobreviven al --rm.
+      - ./data:/work/data
     working_dir: /work
+    environment:
+      API_URL: http://api:8000
+      # Mismas variables y defaults que el servicio postgres: sin credenciales nuevas.
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-guardian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cambia_esto}
+      POSTGRES_DB: ${POSTGRES_DB:-guardian}
     # Espera a que la API responda, no solo a que su contenedor arranque.
     depends_on:
       api:
