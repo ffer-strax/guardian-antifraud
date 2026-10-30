@@ -47,7 +47,7 @@ def _signals(**changes):
 
 # --- Cada señal en su umbral exacto ---
 
-def test_human_baseline_triggers_nothing():
+def test_example_human_triggers_nothing():
     result = _signals()
     assert all(result[name] is False for name in SIX_SIGNALS)
     assert result["behavior_missing"] is False
