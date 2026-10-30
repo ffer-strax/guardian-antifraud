@@ -3,6 +3,9 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+    # La página no va dentro de la imagen: se monta de solo lectura en /frontend.
+    volumes:
+      - ./frontend:/frontend:ro
     environment:
       REDIS_URL: redis://redis:6379/0
       REDIS_TIMEOUT_MS: ${REDIS_TIMEOUT_MS:-}

@@ -3,13 +3,15 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from pathlib import Path
+from typing import Annotated
 
 import redis
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from services import asn_lookup, audit_log, geo_lookup, risk_engine
 from services.email_utils import canonicalize_email, is_disposable
@@ -157,10 +159,49 @@ def _reject(background_tasks: BackgroundTasks, record: dict, detail: str) -> JSO
     return JSONResponse(status_code=400, content={"detail": detail})
 
 
+# Los nombres van en camelCase porque son los mismos que manda el navegador en el JSON.
+# Campos extra se ignoran (extra="ignore") y todo es opcional: lo que el colector no pudo leer llega en null.
+class ScreenInfo(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    width: int | None = Field(default=None, ge=0, le=20000)
+    height: int | None = Field(default=None, ge=0, le=20000)
+    colorDepth: int | None = Field(default=None, ge=0, le=64)
+
+
+class Fingerprint(BaseModel):
+    """Huella del navegador. Por ahora solo se valida; no se guarda ni se compara."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    canvasHash: str | None = Field(default=None, max_length=128)
+    webglRenderer: str | None = Field(default=None, max_length=256)
+    hardwareConcurrency: int | None = Field(default=None, ge=0, le=256)
+    screen: ScreenInfo | None = None
+    languages: list[Annotated[str, Field(max_length=35)]] | None = Field(default=None, max_length=10)
+    platform: str | None = Field(default=None, max_length=64)
+    maxTouchPoints: int | None = Field(default=None, ge=0, le=100)
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     # Zona horaria del navegador (ej. "Europe/Madrid"); opcional. Más de 64 caracteres -> 422.
     timezone: str | None = Field(default=None, max_length=64)
+    fingerprint: Fingerprint | None = None
+
+
+# En el repo es <raíz>/frontend; en Docker, /code/app/main.py -> /frontend (volumen de docker-compose).
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+
+@app.get("/collector.js")
+def collector() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "collector.js", media_type="text/javascript")
 
 
 @app.get("/health")

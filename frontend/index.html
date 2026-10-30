@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registro</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 16px; color: #222; }
+    h1 { font-size: 1.4rem; }
+    label { display: block; margin-bottom: 6px; }
+    input { width: 100%; padding: 8px; box-sizing: border-box; font-size: 1rem; }
+    button { margin-top: 12px; padding: 8px 16px; font-size: 1rem; }
+    #result { margin-top: 16px; min-height: 1.5em; }
+    footer { margin-top: 48px; font-size: 0.8rem; color: #666; }
+  </style>
+</head>
+<body>
+  <h1>Crear cuenta</h1>
+  <form id="register-form">
+    <label for="email">Correo</label>
+    <input id="email" name="email" type="email" required autocomplete="email">
+    <button type="submit">Registrarme</button>
+  </form>
+  <p id="result" role="status"></p>
+
+  <footer>
+    <!-- Atribución que exige la licencia CC BY 4.0 de la base de países. -->
+    <a href="https://db-ip.com">IP Geolocation by DB-IP</a>
+  </footer>
+
+  <script src="collector.js"></script>
+</body>
+</html>
