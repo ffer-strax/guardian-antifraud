@@ -362,3 +362,60 @@ con los resultados a la vista (sesgo).
 - `speed_cv` se recolecta y no se usa. La exención táctil deja las señales de mouse sin evaluar.
 - Playwright pulsa las teclas con duración constante, y `dwell_uniform` depende de eso: un bot
   con jitter lo esquiva.
+
+  ## D33. PR-3: no bloquear todas las VPN
+
+**Contexto.** PR-3 cita al Head of Product: "The system must block every user who uses a VPN. VPNs are for criminals and people with something to hide." La traté como una entrada para analizar, no como una orden, como pide el enunciado. El objetivo detrás es reducir el fraude (~15 % de los registros, ~1 200 al día); bloquear VPN es un medio, no el objetivo.
+
+**Lo que puedo y no puedo detectar.** Mi motor no detecta "VPN": detecta si la IP pertenece a un ASN de hosting o nube (`hosting_ip`, 25 puntos). Una VPN con salida en IP residencial, un proxy residencial o una VPN corporativa fuera de mi lista no se detectan. Con datos gratuitos, "bloquear todas las VPN" no es implementable; solo puedo bloquear datacenters.
+
+**Quién sale perjudicado.** Personas que usan VPN por privacidad, en redes públicas, para trabajo remoto o porque su empresa enruta por una VPN, viajeros y personas en países con censura. También quien sale por una IP de nube sin saberlo. Un falso positivo me cuesta un usuario legítimo que no vuelve, y mi sistema no tiene canal de apelación (ETHICS, sección 4), así que el bloqueo es definitivo. Es un argumento mío, sin cifras: no medí falsos positivos con usuarios reales.
+
+**Evidencia de mi campaña (D32; sintética, 35 por nivel, no es una medición real).**
+- Bots desde datacenter (niveles 1 y 2): `hosting_ip` sumó 25 en los 35 de cada nivel, y aun así, sin la señal de dispositivo repetido, el nivel 1 quedó en 65 (`review`) y el nivel 2 en 45 (`step_up`). Ninguno llegó a bloqueo solo por la IP.
+- Bot con IP residencial (nivel 3): 22 de 35 con `allow`; con evasión laxa, 35 de 35. Quien sabe evitar un datacenter evita la regla.
+Conclusión: la regla literal bloquearía a personas honestas y dejaría pasar al atacante que describe el propio enunciado ("residential proxies").
+
+**Alternativas.**
+1. Bloquear toda VPN (PR-3 literal). Descartada por lo anterior.
+2. Señal blanda (lo que hago). `hosting_ip` sola suma 25 y da `allow`; con zona horaria incoherente suma 35 y da `step_up` (tests `test_hosting_alone_is_25_allow` y `test_hosting_and_mismatch_is_35_step_up`). Ninguna señal sola llega a `block` (máximo individual 35, bloqueo desde 85).
+3. Pedir verificación a las IP de hosting en vez de bloquear. El escalón existe, pero el paso de verificación no (D32).
+4. Limitar las capacidades de las cuentas nuevas en vez de bloquear el registro. No implementado.
+5. Listas de reputación (FireHOL, Spamhaus DROP). No implementadas.
+
+**Recomendación.** No bloquear VPN. Mantener `hosting_ip` como señal blanda combinada, nunca suficiente por sí sola para `block`. Antes de subir su peso, correr el motor en modo sombra (registrar sin actuar) y medir cuánto fraude confirmado y cuántos usuarios legítimos vienen de IP de hosting. Sin esa medición, el peso es una hipótesis, igual que el resto de mis pesos.
+
+**Limitaciones.** No medí falsos positivos con usuarios VPN reales. La lista de ASN de hosting es aproximada. Las cifras de la campaña no son una medición real (D32).
+
+## D34. No implementar el modelo de ML
+
+**Contexto.** La Fase 5 pide entrenar un modelo de detección de anomalías (Isolation Forest, autoencoder u otro) y justificar la elección en DECISIONS.md. No lo implementé.
+
+**Decisión.** No hay modelo de ML. La detección es un motor de reglas con pesos (`risk_engine.py`) más el grafo de cuentas por lotes (D31).
+
+**Por qué.**
+1. **Prioridad y tiempo.** El enunciado dice que, si falta tiempo, unas Fases 1–3 y 6 profundas y con resultados honestos valen más que todas superficiales, y que dentro de la Fase 5 el grafo vale más que el ML. La rúbrica asigna 15 puntos al grafo y ninguna línea aparte al ML. Seguí esa guía.
+2. **No hay datos reales etiquetados.** El enunciado también lo dice: no existe un dataset público de fraude. Un modelo entrenado con mi propio generador sintético solo aprendería a reconocer mi generador. Es la misma circularidad de mi campaña (D32): la precisión, el recall y la curva PR no dirían nada del fraude real.
+3. **Auditabilidad (PR-4).** Un motor de reglas deja `reasons` por cada decisión; un modelo de anomalías necesitaría explicabilidad adicional.
+
+**Qué pierdo.** Un modelo podría encontrar combinaciones de señales que no se me ocurrieron y adaptarse si cambian los atacantes; mis pesos son hipótesis fijas. Las métricas de precisión y recall que sí tengo son las del grafo (`scripts/detect_farms.py`), sobre datos sintéticos.
+
+**Cómo lo cerraría en producción.** Con etiquetas reales (cuentas confirmadas como fraude por revisión manual y señales posteriores), validación con partición temporal y comparación en modo sombra contra el motor de reglas antes de reemplazarlo.
+
+## D35. Latencia de /register: medida en localhost, camino feliz
+
+**Contexto.** PR-2 exige p95 < 300 ms. Hasta hoy no estaba medida de punta a punta. Script: `scripts/measure_latency.py`; resultados: `data/latency_results.json` (30 oct 2026, una sola corrida).
+
+**Cómo medí.** Peticiones HTTP reales a `POST /register` en Docker Desktop (Windows), desde el mismo equipo y de una en una; no es una prueba de carga. Payload completo (huella y comportamiento) y límites de tasa subidos solo para la medición. Escenario A: dominio con MX en caché (200 medidas, 5 de calentamiento descartadas). Escenario B: primera petición a 20 dominios distintos con la caché MX de Redis vaciada.
+
+**Resultados.** A: p50 66.9 ms, p95 72.9 ms, p99 77.2 ms, máximo 89.9 ms. B: p50 79.9 ms, p95 157.7 ms, p99 186.1 ms, máximo 193.2 ms. Ninguna petición pasó de 300 ms.
+
+**Cómo leerlos.**
+- Peor caso de huella a propósito: todas comparten plataforma, núcleos y pantalla (valores inventados), así que cada una se compara con hasta 200 huellas previas.
+- "En frío" solo vacía la caché de Redis; el DNS de Docker o del equipo puede tener la suya. B tiene n = 20, su p95 es una estimación gruesa.
+- Medí el camino feliz, no los fallos: un DNS que no responde espera hasta `MX_DNS_TIMEOUT_MS` (1000 ms por defecto) y un Redis caído hasta 200 ms por llamada, y esos casos superan 300 ms. El p95 se cumple mientras menos del 5 % de las peticiones caiga en esos fallos; no lo puedo demostrar.
+- No medí carga concurrente ni 200 rps.
+
+**Decisión.** Declaro PR-2 cumplida en el camino feliz y no demostrada con fallos. No cambio el timeout hoy. Alternativa pendiente: bajar `MX_DNS_TIMEOUT_MS` a ~250 ms; costo: más resultados "desconocido" con un DNS lento (fail-open, no bloquea a nadie).
+
+**Reproducir.** Con los límites subidos (`RATE_LIMIT_IP_MAX` y `RATE_LIMIT_EMAIL_MAX`): `python scripts/measure_latency.py --flush-mx`.
