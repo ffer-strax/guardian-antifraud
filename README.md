@@ -29,10 +29,10 @@ Proyecto del reto técnico "GUARDIÁN" (empresa ficticia: Conecta). Python 3.11+
 
 ### Documentación
 
-- [ ] `DECISIONS.md` — decisiones (en curso)
+- [x] `DECISIONS.md` — decisiones con sus trade-offs (D1–D36)
 - [x] `ETHICS.md` — huellas digitales y minimización de datos
 - [x] `INDUSTRY.md` — cómo se usan estas técnicas en sistemas reales (con fuentes)
-- [x] `AI_USAGE.md` — registro de uso de IA (en curso)
+- [x] `AI_USAGE.md` — registro de uso de IA
 - [x] Análisis de PR-3 (exigencia de bloquear todas las VPN) (ver D33)
 
 ### Qué NO se hizo, y por qué
@@ -249,6 +249,8 @@ tests/          # pruebas unitarias y de integración
 .github/workflows/ci.yml
 docker-compose.yml
 ```
+
+Nota: los documentos (DECISIONS, ETHICS, INDUSTRY y AI_USAGE) están en la raíz y no en `docs/`. No hay `backend/ml/` porque no se implementó ML (D34).
 
 ---
 
