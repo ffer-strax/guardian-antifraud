@@ -31,8 +31,8 @@ Proyecto del reto técnico "GUARDIÁN" (empresa ficticia: Conecta). Python 3.11+
 
 - [ ] `DECISIONS.md` — decisiones (en curso)
 - [x] `ETHICS.md` — huellas digitales y minimización de datos
-- [ ] `INDUSTRY.md` — cómo se usan estas técnicas en sistemas reales (con fuentes)
-- [ ] `AI_USAGE.md` — registro de uso de IA (en curso)
+- [x] `INDUSTRY.md` — cómo se usan estas técnicas en sistemas reales (con fuentes)
+- [x] `AI_USAGE.md` — registro de uso de IA (en curso)
 - [x] Análisis de PR-3 (exigencia de bloquear todas las VPN) (ver D33)
 
 ### Qué NO se hizo, y por qué

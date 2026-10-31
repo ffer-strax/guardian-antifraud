@@ -119,7 +119,7 @@ copia estatica en el repositorio.
 - Por qué: un timeout es un fallo de mi consulta, no un hecho del dominio; cachearlo dejaría pasar sin verificar durante una hora a un dominio que quizá no recibe correo
 - Trade-off: con caché fría una petición puede tardar hasta ~2 s (MX + A), por encima de los 300 ms; medido ~350 ms con DNS real y 25-40 ms con caché.
 - Limitaciones: un dominio solo con IPv6 (AAAA) daría no_mail; un atacante que provoque timeouts se salta el chequeo (fail-open); endpoint síncrono, una consulta lenta ocupa un hilo; la caché crece con cada dominio distinto (acotada por el rate limit).
-- Pendiente: marcar "no verificado" en el log de auditoría y sumar riesgo en el score.
+- No implementado: marcar "no verificado" en el log de auditoría y sumar riesgo en el score. Medición posterior de la caché fría en D35.
 
 ## D20: lookup propio con prefijo más largo, y pyasn solo para generar el archivo. Razón: la imagen slim no trae compilador y en PyPI solo hay código fuente. Fuente: RIB de Routeviews del 29-oct-2026, 1 159 994 prefijos IPv4, .gz de 4 MB.
 
@@ -167,7 +167,7 @@ Qué pierdo con esto: el código es un poco menos claro y depende de cómo el si
 ## D26: País de la IP con DB-IP Lite
 Qué problema había: necesito el país de cada IP, sin pagar (NFR-3).
 Qué elegí: DB-IP Lite, versión país, octubre de 2026. Es gratis, con licencia CC BY 4.0, y la uso con atribución. El archivo trae 710,834 filas; al cargar solo conservo 362,108 rangos IPv4 y verifiqué el MD5 contra el publicado. Carga en 1.2 s y usa 31 MiB.
-Qué descarté y por qué: las bases que piden registrarse con una cuenta y una clave de licencia (verifica esto antes de afirmarlo en la defensa), porque complican el docker-compose up de un solo comando.
+Qué descarté y por qué: las bases que exigen crear una cuenta y bajar con una clave de licencia (no verifiqué cuáles de las alternativas lo exigen hoy), porque complican el docker-compose up de un solo comando.
 Qué pierdo con esto: es menos exacta que la versión de pago (su propio índice de exactitud es 81 contra 93). Solo da país, no ciudad. Ignoro IPv6, así que un usuario con IPv6 se queda sin país. Y hay que poner el enlace "IP Geolocation by DB-IP" en las páginas que usen estos datos.
 
 ## D28: Audit log en PostgreSQL (PR-4)
