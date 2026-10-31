@@ -215,6 +215,8 @@ Contexto, decisiones y limitaciones de la campaña: [D32 en DECISIONS.md](DECISI
 
 3. Agregaría una señal sobre la variación de la velocidad del mouse: imitar una distribución humana cuesta más que fingir un promedio, aunque no es imposible. No confío en las cifras tal cual: n = 35, el 63 % y el 40 % bajan por colisiones de la huella del bot (13 y 16 casos) y no por la defensa, y el bot, el motor y los umbrales los hicimos nosotros (yo y los agentes) con 5 muestras humanas.
 
+4. Plan de detección retroactiva. Lo que el registro deja pasar se podría detectar después con lo que ya guardo (`audit_log` y `device_fingerprints`): (a) correr el grafo por lotes (`scripts/detect_farms.py`, D31) sobre las últimas 48 horas para marcar grupos de 4 o más cuentas con el mismo dispositivo o subred; (b) volver a puntuar registros viejos con pesos nuevos, porque `audit_log` guarda las señales; (c) buscar ráfagas de registros en poco tiempo. Hoy nada de esto está conectado: falta un adaptador entre las tablas y el grafo, y el grafo solo se probó con datos sintéticos. Es un plan, no una función. Los bots del nivel 3 que repiten huella (13 casos) podrían ser candidatos a ese grafo, aunque no lo probé.
+
 ---
 
 ## Limitaciones conocidas
@@ -222,12 +224,13 @@ Contexto, decisiones y limitaciones de la campaña: [D32 en DECISIONS.md](DECISI
 - No existe flujo de verificación (correo/SMS) ni cola de revisión manual: `step_up` y `review` solo devuelven el estado (`verification_required` o `pending_review`) y dejan una fila en `audit_log`.
 - El grafo de cuentas corre por lotes sobre datos sintéticos y no está integrado en `/register` (D31).
 - Exención táctil: en un dispositivo táctil las señales de ratón no se evalúan, y un bot puede declararse táctil para saltárselas (nivel 3b de la campaña, D32).
-- Solo IPv4: las IPv6 quedan sin país.
+- Solo IPv4 (D36): una IP IPv6 no tiene señal de hosting ni país, y el límite de peticiones cuenta por dirección completa, no por bloque. Un atacante con IPv6 solo se evalúa por dispositivo y comportamiento.
 - Latencia (D35): p95 de 73 ms con MX en caché y 158 ms con MX en frío (n = 20), medido en localhost con una petición a la vez. No se midieron fallos de DNS o Redis, que pueden superar 300 ms, ni carga concurrente.
 - Un bot que falsea su zona horaria para que coincida con su IP pasa esa señal.
 - La clasificación por ASN es aproximada: un ASN de hosting puede contener rangos de otras organizaciones.
 - Los pesos y umbrales no están calibrados con datos reales.
 - Un bot con IP residencial coherente y tecleo con ritmo humano pasa: 22 de 35 con `allow` en el nivel 3 de la campaña (D32).
+
 
 ---
 
