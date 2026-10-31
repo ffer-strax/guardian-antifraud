@@ -1,5 +1,7 @@
 # DECISIONS
 
+> Nota de numeración: D16, D19 y D22 no se usaron; D27 se eliminó por duplicar D23.
+
 ## D1. Python 3.12 dentro de Docker, no el 3.15 local
 - Contexto: tengo Python 3.15 instalado; el reto pide 3.11+
 - Alternativas: usar 3.15 local / imagen 3.12 en contenedor
@@ -44,7 +46,7 @@ Public Domain Dedication
 fecha de descarga:21 de octubre del 2026
 copia estatica en el repositorio.
 
-## D8 (planeada, aún no implementada). Geografía como señal blanda
+## D8. Geografía como señal blanda (implementada, ver D23)
 - Decisión: comparar la zona horaria del navegador contra todas las zonas
   válidas del país de la IP, con peso bajo, sin decidir nunca por sí sola
 - Por qué: Canarias (UTC+0) con IP en Madrid (UTC+1) sería un falso positivo
@@ -87,7 +89,7 @@ copia estatica en el repositorio.
 - Por qué: mis tests corren en un contenedor temporal donde localhost no es el Redis del compose; evita estado compartido y dependencias nuevas.
 - Qué no prueba: el paso del tiempo, el Redis real ni la concurrencia. Verificado a mano: con límite 3, el cuarto intento dio 429 con retry-after, y tras 1 min volvió a dar 200.
 
-## Limitaciones (añadir)
+### Limitaciones de D9–D14
 - Los 422 (formato inválido) no consumen cupo por IP porque FastAPI los rechaza antes de entrar a la función.
 - Detrás de un proxy, request.client.host sería la IP del proxy; no se confía en X-Forwarded-For.
 - En local con Docker, todas mis pruebas comparten una misma IP.
@@ -121,10 +123,11 @@ copia estatica en el repositorio.
 
 ## D20: lookup propio con prefijo más largo, y pyasn solo para generar el archivo. Razón: la imagen slim no trae compilador y en PyPI solo hay código fuente. Fuente: RIB de Routeviews del 29-oct-2026, 1 159 994 prefijos IPv4, .gz de 4 MB.
 
-## D21: socket.inet_pton en vez de ipaddress para leer el archivo, tras medir 37 s frente a 3.9 s. Mi prompt decía “usa ipaddress”, y cambiaste la regla con datos.
-- Números medidos por ti: carga 2.92 s, 123.2 MiB retenidos, pico de 139.1 MiB, 24.6 µs por consulta.
+## D21: socket.inet_pton en vez de ipaddress para leer el archivo, tras medir 37 s frente a 3.9 s. Mi prompt decía “usa ipaddress”, y cambié la regla con datos.
+- Números medidos: carga 2.92 s, 123.2 MiB retenidos, pico de 139.1 MiB, 24.6 µs por consulta.
 
-# Limitaciones: la carga perezosa hace que la primera petición espere ~3 s (hay que cargar al arrancar); la base vacía por fallo no se reintenta; solo IPv4; cada proceso cargaría su propia copia en memoria.
+### Limitaciones de D20–D21
+- Las bases se cargan al arrancar (lifespan de main.py), así que la primera petición ya no espera esos ~3 s; la base vacía por fallo no se reintenta; solo IPv4; cada proceso cargaría su propia copia en memoria.
 
 ## D23: Señal de zona horaria vs. país de la IP
 
@@ -152,7 +155,7 @@ configuración antes que castigarlo sin evidencia.
 Qué problema había: necesito saber de qué red es una IP (por ejemplo, si es de Amazon o de un proveedor de casa). La librería pyasn no se instala en la imagen de Docker: no trae versión precompilada y la imagen slim no tiene el compilador gcc.
 Qué elegí: escribí mi propio buscador en Python. Guardo los prefijos agrupados por longitud y busco desde el más largo (/32) hasta el más corto (/0). El primero que coincide gana, así que un /24 le gana a un /16. Usé pyasn una sola vez, fuera del proyecto, para convertir los datos de Routeviews (29-oct-2026, 1,159,994 prefijos) a un archivo que sí versioné (4 MB comprimido).
 Qué descarté y por qué: pyasn en producción, porque obligaría a instalar un compilador en la imagen y a depender de una versión que solo declara soporte hasta 3.11. También descarté recorrer todas las redes una por una en cada consulta, porque con más de un millón de prefijos sería demasiado lento para el límite de 300 ms.
-Qué pierdo con esto: tengo que mantener mi propio código. El archivo de datos es una foto de un día y se va quedando viejo. No encontré una licencia explícita de Routeviews y lo digo en ETHICS.md. Y el buscador usa unos 123 MiB de memoria por proceso.
+Qué pierdo con esto: tengo que mantener mi propio código. El archivo de datos es una foto de un día y se va quedando viejo. Los datos de RouteViews se licencian bajo CC BY 4.0, con atribución obligatoria (DOI 10.7264/1y7v-2d90); aparte hay unos "Commercial Terms of Use" para quien vende productos derivados (lo verifiqué en routeviews.org el 30-oct-2026). La atribución está en el README. Y el buscador usa unos 123 MiB de memoria por proceso.
 Cómo lo comprobé: carga en 2.92 s y 24.6 microsegundos por consulta, medido con scripts/measure_asn.py. Hay tests para el prefijo más largo, IP privadas, IPv6 y archivos dañados.
 
 ## D25: Leer las IP con inet_pton y no con ipaddress
@@ -166,9 +169,6 @@ Qué problema había: necesito el país de cada IP, sin pagar (NFR-3).
 Qué elegí: DB-IP Lite, versión país, octubre de 2026. Es gratis, con licencia CC BY 4.0, y la uso con atribución. El archivo trae 710,834 filas; al cargar solo conservo 362,108 rangos IPv4 y verifiqué el MD5 contra el publicado. Carga en 1.2 s y usa 31 MiB.
 Qué descarté y por qué: las bases que piden registrarse con una cuenta y una clave de licencia (verifica esto antes de afirmarlo en la defensa), porque complican el docker-compose up de un solo comando.
 Qué pierdo con esto: es menos exacta que la versión de pago (su propio índice de exactitud es 81 contra 93). Solo da país, no ciudad. Ignoro IPv6, así que un usuario con IPv6 se queda sin país. Y hay que poner el enlace "IP Geolocation by DB-IP" en las páginas que usen estos datos.
-
-## D27: Zona horaria contra país (el caso de Canarias)
-Qué problema había: si la
 
 ## D28: Audit log en PostgreSQL (PR-4)
 Qué problema había: cada decisión debe quedar registrada con las señales que la produjeron, y sin guardar el correo en claro.
@@ -235,7 +235,7 @@ reduce los datos personales: nunca sale qué tecla se pulsó ni coordenadas.
 - Enviar los eventos crudos y analizarlos en el servidor: más flexible, pero
   guarda datos que pueden revelar lo que escribe una persona (ver ETHICS.md).
 - Un modelo de aprendizaje automático: sin datos reales etiquetados sería inventar
-  resultados (ver D19).
+  resultados (ver D31 y "Qué NO se hizo" en el README).
 
 **Costo:**
 - behavior_missing penaliza a quien no manda el bloque. Atrapa al bot que llama a
@@ -310,7 +310,7 @@ allow/step_up/review: las bloqueadas no entrarían al grafo.
 ## D32. Cómo medimos la evasión: campaña con navegador real y 4 niveles de bot
 
 **Contexto.** Necesitamos saber si el motor frena a un atacante de verdad y no solo a datos
-sintéticos que nosotros mismos generamos (D31). Código: commit `<hash>`.
+sintéticos que nosotros mismos generamos (D31). Código: commit `af29d60`.
 
 **Decisión.** Una campaña de bots con Chromium real (Playwright 1.64.1 en Docker) contra la API,
 con 4 niveles: (1) bot ingenuo, (2) tecleo y mouse humanizados desde IP de datacenter,
