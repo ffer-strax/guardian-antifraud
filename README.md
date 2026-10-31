@@ -24,7 +24,7 @@ Proyecto del reto técnico "GUARDIÁN" (empresa ficticia: Conecta). Python 3.11+
   - [ ] ~~Listas de reputación públicas (FireHOL, Spamhaus DROP)~~ — **no implementadas** (recorte por tiempo)
 - [x] **Fase 3 — Huellas de dispositivo** (versión reducida: colector en JavaScript + similitud ponderada por atributo)
 - [x] **Fase 4 — Biometría de comportamiento** (colector en el navegador que envía solo agregados, nunca teclas ni coordenadas; 7 señales; ver D30)
-- [x] **Fase 5 — Grafo de cuentas** (detección de granjas de ≥ 4 cuentas, por lotes sobre datos sintéticos; v2 con ventana de 48 h y evidencia fuerte; **no está conectado a `/register`**; ver D31). *No se implementa el modelo de ML.*
+- [x] **Fase 5 — Grafo de cuentas** (detección de granjas de ≥ 4 cuentas, por lotes sobre datos sintéticos; v2 con ventana de 48 h y evidencia fuerte; **no está conectado a `/register`**; ver D31). *No se implementa el modelo de ML. (ver D34)*
 - [x] **Fase 6 — Evasión adversaria** (campaña con Chromium real vía Playwright y 4 niveles de bot: 1, 2, 3 y 3b; 35 registros por nivel = 140 en total; ver D32)
 
 ### Documentación
@@ -33,7 +33,7 @@ Proyecto del reto técnico "GUARDIÁN" (empresa ficticia: Conecta). Python 3.11+
 - [x] `ETHICS.md` — huellas digitales y minimización de datos
 - [ ] `INDUSTRY.md` — cómo se usan estas técnicas en sistemas reales (con fuentes)
 - [ ] `AI_USAGE.md` — registro de uso de IA (en curso)
-- [ ] Análisis de PR-3 (exigencia de bloquear todas las VPN)
+- [x] Análisis de PR-3 (exigencia de bloquear todas las VPN) (ver D33)
 
 ### Qué NO se hizo, y por qué
 
@@ -223,7 +223,7 @@ Contexto, decisiones y limitaciones de la campaña: [D32 en DECISIONS.md](DECISI
 - El grafo de cuentas corre por lotes sobre datos sintéticos y no está integrado en `/register` (D31).
 - Exención táctil: en un dispositivo táctil las señales de ratón no se evalúan, y un bot puede declararse táctil para saltárselas (nivel 3b de la campaña, D32).
 - Solo IPv4: las IPv6 quedan sin país.
-- La latencia total de `/register` no está medida de punta a punta. La primera consulta MX de un dominio puede superar los 300 ms, y con Redis caído la espera puede ser mucho mayor (ver `DECISIONS.md`).
+- Latencia (D35): p95 de 73 ms con MX en caché y 158 ms con MX en frío (n = 20), medido en localhost con una petición a la vez. No se midieron fallos de DNS o Redis, que pueden superar 300 ms, ni carga concurrente.
 - Un bot que falsea su zona horaria para que coincida con su IP pasa esa señal.
 - La clasificación por ASN es aproximada: un ASN de hosting puede contener rangos de otras organizaciones.
 - Los pesos y umbrales no están calibrados con datos reales.
