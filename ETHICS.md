@@ -73,7 +73,8 @@ bloqueo exige combinar varias, por ejemplo `device_reuse_high` + `form_too_fast`
 - **No hay canal de apelación.** Quien recibe un bloqueo (403) no puede impugnarlo.
 - **Revisión manual y verificación no existen como sistema.** Una decisión `pending_review` o
   `verification_required` solo devuelve ese estado y deja una fila en `audit_log`. No hay cola,
-  pantalla ni persona asignada. Hoy `step_up` equivale a dejar pasar (D32).
+  pantalla ni persona asignada. Hoy `step_up` equivale a dejar pasar (D32). Por eso, en la
+  práctica, ninguna decisión de mi motor pasa por una persona.
 - **No medí falsos positivos** con humanos reales, ni por grupos distintos de personas (otros
   dispositivos, otros países, tecnologías de apoyo). Cualquier sesgo contra ellos no está medido.
 - **Las cifras de evasión no son una medición real** (D32): son 35 registros por nivel, una semilla,
@@ -91,7 +92,7 @@ Aun así, el repositorio es público y publica los pesos, los umbrales y los res
 pasa. Es lo que pide un proyecto de evaluación, pero en un sistema real no publicaría los umbrales
 ni la tabla de evasión: servirían de hoja de ruta para un atacante.
 
-## 6. Privacidad y marco legal (lo que verifiqué, y lo que no)
+## 6. Privacidad y marco legal
 
 Consulté las fuentes el 30-oct-2026. No soy abogado y no apliqué esto a un caso real.
 
@@ -99,17 +100,18 @@ Consulté las fuentes el 30-oct-2026. No soy abogado y no apliqué esto a un cas
 - La Ley Federal de Protección de Datos Personales en Posesión de los Particulares se renovó: se
   publicó el 20-mar-2025, entró en vigor el 21 y la autoridad pasó del INAI a la Secretaría
   Anticorrupción y Buen Gobierno ([Garrigues](https://www.garrigues.com/es_ES/noticia/mexico-nueva-ley-federal-proteccion-datos-personales-posesion-particulares-introduce)).
-- Define dato personal como información de una persona "identificada o identificable" (art. 2,
-  fr. V), y establece principios de licitud, finalidad, proporcionalidad e información (arts. 5,
-  11, 12 y 14), en el [texto oficial](https://www.diputados.gob.mx/LeyesBiblio/pdf/LFPDPPP.pdf).
-  Mi interpretación, que no verifiqué con un abogado: una IP unida a una huella de dispositivo
-  puede hacer identificable a alguien, así que trataría ambas como datos personales.
-- El art. 26, fr. II da derecho de oposición al tratamiento automatizado que evalúa aspectos
-  personales "sin intervención humana" cuando produce efectos no deseados. Mi bloqueo automático
-  encaja en esa descripción. **[Verificar todos los números de artículo de esta sección y la
-  redacción exacta del art. 26 contra el PDF oficial antes de citarlos.]**
-- Los datos biométricos no aparecen nombrados en la lista de datos sensibles que leí. No afirmo
-  que mis agregados de tecleo lo sean: no identifican a una persona.
+- Según el [texto oficial](https://www.diputados.gob.mx/LeyesBiblio/pdf/LFPDPPP.pdf), dato personal
+  es información de una persona "identificada o identificable" (art. 2, fr. V), y los principios del
+  art. 5 incluyen licitud (art. 6), finalidad (art. 11), proporcionalidad (art. 12) e información
+  (art. 14). Mi interpretación, que no verifiqué con un abogado: una IP unida a una huella de
+  dispositivo puede hacer identificable a alguien, así que trataría ambas como datos personales.
+- El art. 26, fr. II da derecho de oposición cuando el tratamiento está destinado a evaluar, "sin
+  intervención humana", aspectos personales de la persona y produce efectos no deseados o la afecta
+  de forma relevante. Mi motor podría encajar: bloquea (403) sin que intervenga una persona, y como
+  la cola de revisión no existe (sección 4), tampoco la hay en `review`. No lo consulté con un
+  abogado ni sé si aplicaría a un antifraude.
+- No evalué si mis agregados de tecleo cuentan como dato sensible o biométrico. Por sí solos no
+  identifican a una persona, pero no lo verifiqué.
 
 **Unión Europea (si hubiera usuarios allí).**
 - El [Considerando 30 del GDPR](https://activemind.legal/legislation/gdpr/recital-30) dice que las
@@ -123,25 +125,21 @@ Consulté las fuentes el 30-oct-2026. No soy abogado y no apliqué esto a un cas
   bloqueo automático podría entrar ahí, y no resolví si alguna excepción me cubre.
 - Las [directrices 2/2023 del EDPB](https://edpb.europa.eu:443/system/files/2024-10/edpb_guidelines_202302_technical_scope_art_53_eprivacydirective_v2_en_0.pdf)
   dicen que la huella de dispositivo cae dentro del Art. 5(3) de la directiva ePrivacy, pero que
-  eso no significa de forma sistemática que haga falta consentimiento, y no analizan las
-  excepciones ni citan la prevención del fraude como una de ellas. Para mi caso, la pregunta de si el fraude justifica leer la huella sin
-  consentimiento queda **abierta**.
+  eso no significa de forma sistemática que haga falta consentimiento. No analizan las excepciones
+  ni citan la prevención del fraude como una de ellas. La pregunta de si el fraude justifica leer
+  la huella sin consentimiento queda **abierta**.
 
 ## 7. Fuentes de datos y licencias
 
-Para esta prueba usé datos públicos para construir las bases del motor. En producción verificaría
-la licencia y los términos de cada fuente antes de usarla, buscaría la opción más conveniente, de
+Para esta prueba usé datos públicos porque son de código abierto. En producción verificaría la
+licencia y los términos de cada fuente antes de usarla, buscaría la opción más conveniente, de
 preferencia gratuita, y si no hubiera una con licencia clara evaluaría pagar una base comercial.
 
 | Fuente | Qué usé | Lo que verifiqué |
 |---|---|---|
-| [RouteViews](https://www.routeviews.org/) | Volcado de rutas BGP (29-oct-2026) para IP→ASN | Su sitio licencia sus datos bajo **CC BY 4.0**: pide atribución y un DOI (10.7264/1y7v-2d90). Hay términos comerciales aparte, para quien vende productos derivados, y el permiso es revocable ([términos](https://www.routeviews.org/routeviews/licenses/)). No leí el texto completo de CC BY |
+| [RouteViews](https://www.routeviews.org/) | Volcado de rutas BGP (29-oct-2026) para IP→ASN | Su sitio licencia sus datos bajo **CC BY 4.0**: pide atribución y un DOI (10.7264/1y7v-2d90), que está en el README. Hay términos comerciales aparte, para quien vende productos derivados, y el permiso es revocable ([términos](https://www.routeviews.org/routeviews/licenses/)). No leí el texto completo de CC BY |
 | [DB-IP Lite](https://db-ip.com/db/download/ip-to-country-lite) | País por IP | CC BY 4.0; exige un enlace a DB-IP en las páginas que usan los resultados. Lo tiene `index.html` |
 | bgp.tools | Parte de la lista de ASN de hosting (consulta manual) | Sus [términos](https://bgp.tools/kb/terms-of-service) no regulan scraping, atribución ni redistribución; prohíben una carga inaceptable sobre el servicio |
 | db-ip.com y networksdb.io | Resto de la lista de hosting (consulta manual) | No pude revisar los términos de networksdb.io ni los del sitio web de db-ip.com |
 | tzdata 2026c | Zonas horarias por país | No verifiqué su licencia en esta ocasión |
 | Lista de dominios desechables | Rechazo de correos temporales | CC0, según el repositorio de origen |
-
-**Corrección necesaria:** el README dice que de RouteViews "no se encontró una licencia
-explícita", y eso es inexacto: la tiene (CC BY 4.0). Además, falta la atribución que esa licencia
-pide. La corrijo en el README antes de entregar.
