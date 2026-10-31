@@ -307,3 +307,58 @@ de llave), pero no hay un cargador. Además, device_fingerprints solo guarda cue
 allow/step_up/review: las bloqueadas no entrarían al grafo.
 
 
+## D32. Cómo medimos la evasión: campaña con navegador real y 4 niveles de bot
+
+**Contexto.** Necesitamos saber si el motor frena a un atacante de verdad y no solo a datos
+sintéticos que nosotros mismos generamos (D31). Código: commit `<hash>`.
+
+**Decisión.** Una campaña de bots con Chromium real (Playwright 1.64.1 en Docker) contra la API,
+con 4 niveles: (1) bot ingenuo, (2) tecleo y mouse humanizados desde IP de datacenter,
+(3) IP residencial mexicana distinta por registro, zona horaria coherente y huella variada,
+(3b) lo mismo emulando un teléfono táctil. 35 registros por nivel, semilla 20261030, un registro
+cada 2 s, tablas vaciadas entre niveles. Resultados: `data/campaign_results.json` (30 oct 2026).
+
+**Decisiones menores dentro de la campaña.**
+- **Navegador real, no peticiones HTTP.** Así el colector de comportamiento y la huella corren
+  de verdad. Costo: una campaña tarda ~35 min y la imagen de Docker pesa ~4 GB.
+- **IP simulada con un encabezado de depuración** (`X-Debug-Client-IP`). Solo cambia las señales
+  y el registro de auditoría; el límite de peticiones usa la IP real de la conexión. Con el
+  modo debug apagado, el encabezado se ignora (hay un test). Hay que apagarlo antes de la demo.
+- **Dos definiciones de evasión.** Estricta: la acción es `allow`. Laxa: `allow` o `step_up`,
+  porque el paso de verificación no existe todavía, así que `step_up` equivale a dejar pasar.
+- **Reportar también el score sin `device_reuse`.** Todos los bots salen del mismo navegador y
+  repiten huella, lo que infla las detecciones. La columna "sin device_reuse" recalcula el
+  score con los pesos reales del motor (se importa desde `backend/`, montado en solo lectura) y
+  la campaña aborta si el score recalculado no coincide con el de la API.
+
+**Resultados.**
+
+| Nivel | allow | step_up | review | block | Evasión estricta | Evasión laxa |
+|---|---|---|---|---|---|---|
+| 1 | 0 | 0 | 3 | 32 | 0/35 | 0/35 |
+| 2 | 0 | 1 | 34 | 0 | 0/35 | 1/35 (3 %) |
+| 3 | 22 | 13 | 0 | 0 | 22/35 (63 %) | 35/35 (100 %) |
+| 3b | 14 | 21 | 0 | 0 | 14/35 (40 %) | 35/35 (100 %) |
+
+Sin `device_reuse`: el nivel 1 queda en 65 (`review`), el nivel 2 en 45 (`step_up`) y los
+niveles 3 y 3b en 15 (`allow`).
+
+**Qué significa.** El motor frena a bots con IP de datacenter, pero un bot con IP residencial
+coherente y tecleo con ritmo pasa. La única señal de comportamiento que dispara en el nivel 3
+es `dwell_uniform` (15 puntos), insuficiente incluso para `step_up` (30).
+
+**Alternativas descartadas.** Probar solo con datos sintéticos (circular); lanzar bots sin
+navegador (no ejercitan el colector); endurecer el motor antes de entregar (ver abajo).
+
+**Decisión provisional sobre el hueco.** No se endurece el motor antes de la entrega: se
+documenta el hueco medido. Si se hace una iteración, se declara que los umbrales se calibraron
+con los resultados a la vista (sesgo).
+
+**Limitaciones (honestas).**
+- n = 35 por nivel (22/35 tiene un margen de ±16 puntos) y una sola semilla.
+- Bot, motor y umbrales los diseñamos nosotros, con una línea base de 5 muestras humanas.
+- Las cifras del 63 % y 40 % bajan por colisiones de la huella aleatoria del bot (13 y 16 casos),
+  no por mérito de la defensa; sin `device_reuse` el 100 % pasaría.
+- `speed_cv` se recolecta y no se usa. La exención táctil deja las señales de mouse sin evaluar.
+- Playwright pulsa las teclas con duración constante, y `dwell_uniform` depende de eso: un bot
+  con jitter lo esquiva.
