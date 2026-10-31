@@ -419,3 +419,17 @@ Conclusión: la regla literal bloquearía a personas honestas y dejaría pasar a
 **Decisión.** Declaro PR-2 cumplida en el camino feliz y no demostrada con fallos. No cambio el timeout hoy. Alternativa pendiente: bajar `MX_DNS_TIMEOUT_MS` a ~250 ms; costo: más resultados "desconocido" con un DNS lento (fail-open, no bloquea a nadie).
 
 **Reproducir.** Con los límites subidos (`RATE_LIMIT_IP_MAX` y `RATE_LIMIT_EMAIL_MAX`): `python scripts/measure_latency.py --flush-mx`.
+
+## D36. Puntos ciegos conocidos
+
+**Contexto.** Al revisar mi sistema contra el enunciado encontré límites que no están en ninguna otra decisión. No los corregí; los documento y digo cuánto costaría cerrarlos.
+
+**1. IPv6.** `asn_lookup.py` descarta los prefijos IPv6 y la base de países también los ignora. Una IP IPv6 no suma `hosting_ip` ni se compara con la zona horaria, y mi límite de peticiones cuenta por dirección completa: quien controla un bloque grande de direcciones puede rotarlas sin llegar al límite. Esas señales quedan "no verificadas", como diseñé, pero el atacante solo se evalúa por dispositivo y comportamiento. Cerrarlo: agrupar el límite por bloque (unos 45 minutos con tests) o soportar IPv6 en ASN y país (horas, con datos nuevos). El enunciado no menciona IPv6 y mi demo local usa IPv4, así que lo dejé fuera.
+
+**2. Sin tope de tamaño del cuerpo.** `/register` no limita el tamaño de la petición, y `behavior` acepta cualquier JSON. Un cuerpo enorme se lee completo antes de validarse. No lo probé. Cerrarlo: rechazar peticiones por encima de unos pocos KB antes de procesarlas.
+
+**3. Timeouts de DNS y Redis.** Una consulta DNS que no responde espera hasta 1000 ms y un Redis caído hasta 200 ms por llamada; en esos casos supero los 300 ms de PR-2 (D35).
+
+**4. Telemetría falsificable.** El navegador manda la zona horaria, la huella y el comportamiento, y un atacante que controla el navegador puede fabricarlos (nivel 3 de D32). Solo la IP sale de la conexión.
+
+**Decisión.** Documentar los cuatro y no corregirlos antes de la entrega. El plan de detección retroactiva está en el README.
